@@ -20,6 +20,7 @@ from langchain_openai import ChatOpenAI
 from .tools import TOOL_DEFINITIONS, execute_tool
 
 MAX_TOOL_ROUNDS_PER_TURN = 6  # guards against a runaway tool-call loop within one outer iteration
+REQUEST_TIMEOUT_SECONDS = 60.0  # bounds a single call so a stuck gateway/model fails fast, not silently
 
 
 @dataclass
@@ -66,12 +67,16 @@ class LangChainBackend:
     """
 
     def __init__(self, api_key: str, model: str, system_prompt: str, base_url: Optional[str] = None):
-        http_client = httpx.Client(verify=False)  # noqa: S501 -- required by TCS GenAI Lab's gateway cert
+        # Bounded on both the transport and the client itself so a stuck/slow
+        # gateway or model fails with a clear error instead of hanging the
+        # Streamlit session forever.
+        http_client = httpx.Client(verify=False, timeout=REQUEST_TIMEOUT_SECONDS)  # noqa: S501 -- required by TCS GenAI Lab's gateway cert
         self.llm = ChatOpenAI(
             base_url=base_url,
             model=model,
             api_key=api_key,
             http_client=http_client,
+            timeout=REQUEST_TIMEOUT_SECONDS,
         )
         self.llm_with_tools = self.llm.bind_tools(_openai_tool_defs())
         self.messages: List = [SystemMessage(content=system_prompt)]
