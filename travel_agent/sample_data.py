@@ -3,6 +3,8 @@
 Stops are given as real addresses/place names — they're geocoded on demand
 (see travel_agent.geocoding) rather than shipping pre-baked coordinates, so
 loading a scenario exercises the same real-data path as manually typed stops.
+Street addresses are used wherever a landmark's informal name doesn't
+reliably resolve on the free OSM geocoder.
 """
 
 from __future__ import annotations
@@ -12,7 +14,7 @@ from typing import Dict, List
 from .models import Stop
 
 SCENARIOS: Dict[str, Dict] = {
-    "Urban - NYC (5 stops, 8am-5pm)": {
+    "Urban Delivery (5 stops)": {
         "start_time": "08:00",
         "total_budget_minutes": 540,  # 9 hours
         "stops": [
@@ -23,7 +25,7 @@ SCENARIOS: Dict[str, Dict] = {
             Stop("Top of the Rock", "30 Rockefeller Plaza, New York, NY", earliest="15:00", latest="17:00", duration_minutes=60),
         ],
     },
-    "Regional - 3 Cities (8 stops, 10am-6pm)": {
+    "Regional Logistics (8 stops)": {
         "start_time": "10:00",
         "total_budget_minutes": 480,  # 8 hours
         "stops": [
@@ -37,13 +39,16 @@ SCENARIOS: Dict[str, Dict] = {
             Stop("Empire State Building", "Empire State Building, New York, NY", earliest="15:30", latest="18:00", duration_minutes=60),
         ],
     },
-    "Urgent - Same-Day Errands (3 stops, all by 2pm)": {
+    "Same-day Service (6 stops)": {
         "start_time": "09:00",
-        "total_budget_minutes": 300,  # 5 hours
+        "total_budget_minutes": 480,  # 8 hours
         "stops": [
-            Stop("Downtown Bank Branch", "Wall Street, New York, NY", earliest="09:00", latest="11:00", duration_minutes=20),
-            Stop("City Passport Office", "421 8th Ave, New York, NY", earliest="09:30", latest="13:00", duration_minutes=45),
-            Stop("Courier Pickup Depot", "Grand Central Terminal, New York, NY", earliest="10:00", latest="14:00", duration_minutes=15),
+            Stop("Downtown Delivery", "233 Broadway, New York, NY", earliest="09:00", latest="11:00", duration_minutes=20),
+            Stop("Passport Pickup", "421 8th Ave, New York, NY", earliest="09:30", latest="12:00", duration_minutes=30),
+            Stop("Bank Deposit", "1 Wall St, New York, NY", earliest="10:00", latest="13:00", duration_minutes=15),
+            Stop("Client Meeting", "350 5th Ave, New York, NY", earliest="11:00", latest="14:00", duration_minutes=45),
+            Stop("Warehouse Pickup", "225 Liberty St, New York, NY", earliest="12:00", latest="15:00", duration_minutes=25),
+            Stop("Courier Drop-off", "89 Chambers St, New York, NY", earliest="13:00", latest="16:00", duration_minutes=15),
         ],
     },
 }

@@ -108,8 +108,16 @@ def _build_user_prompt(
         earliest = s.earliest or "none"
         latest = s.latest or "none"
         address = s.display_address or s.address or "n/a"
+        tag = "[START LOCATION, must be first] " if s.is_start else ""
         lines.append(
-            f"- {s.name} | {address} | earliest={earliest} | latest={latest} | duration={s.duration_minutes} min"
+            f"- {tag}{s.name} | {address} | earliest={earliest} | latest={latest} | duration={s.duration_minutes} min"
+        )
+
+    if any(s.is_start for s in stops):
+        lines.append("")
+        lines.append(
+            "The trip begins at the stop marked [START LOCATION] — it must be the first entry in "
+            "your itinerary, with arrival and departure both equal to the trip start time."
         )
 
     lines.append("")

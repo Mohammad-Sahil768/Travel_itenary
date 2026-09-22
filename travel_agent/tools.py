@@ -81,6 +81,10 @@ def validate_constraints(
     if not itinerary:
         return ["Itinerary is empty."]
 
+    start_stops = [s for s in stops_by_name.values() if s.is_start]
+    if start_stops and itinerary[0].get("stop") != start_stops[0].name:
+        violations.append(f"The itinerary must begin at the start location '{start_stops[0].name}'.")
+
     seen = set()
     for entry in itinerary:
         name = entry.get("stop")

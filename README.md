@@ -7,9 +7,19 @@ over up to 3 iterations until every constraint is satisfied.
 
 ## How it works
 
-1. **You provide stops** — a name, a real address/place name, an earliest and
-   latest time (real time pickers), and how long to spend there — plus a trip
-   date, trip start time, and total time budget.
+1. **You provide stops**, one of two ways (sidebar tabs):
+   - **📂 Load Scenario** — pick one of three sample scenarios, preview its
+     stops/times/budget, and click **Load This Scenario** to geocode, route,
+     and optimize it immediately.
+   - **✏️ Custom Stops** — build your own trip: an optional fixed **start
+     location** (a real depot/origin the route must begin from — if set, real
+     travel time from it to your first stop counts against the budget), a
+     total time budget in hours, and a list of stops (address, earliest/latest
+     time pickers, service duration in minutes) with **➕ Add Stop** /
+     🗑️ remove-per-row controls, then click **🚀 Optimize**.
+
+   A shared trip date and trip start time sit above both tabs. Either path
+   converges on the exact same pipeline below, and the same results section.
 2. **Geocoding** — each address is resolved to (latitude, longitude) via
    [OpenStreetMap Nominatim](https://nominatim.org/) (free, no API key, using
    `geopy`). Unresolvable addresses are reported per-stop and block the run
@@ -87,9 +97,19 @@ travel_agent/
 
 ## Sample scenarios
 
-- **Urban** — 5 NYC landmarks, tight 8am–5pm window.
-- **Regional** — 8 stops across 3 nearby cities, 10am–6pm.
-- **Urgent** — 3 errands that must all wrap up by 2pm.
+- **Urban Delivery** — 5 NYC landmarks, tight 8am–5pm window.
+- **Regional Logistics** — 8 stops across 3 nearby cities, 10am–6pm.
+- **Same-day Service** — 6 same-day service/delivery stops, 9am–5pm.
+
+## Custom stops and the start location
+
+A custom trip can optionally pin a **start location** — a real address the
+route must depart from at the trip start time. Internally this is added as a
+zero-duration stop with `is_start=True`; the optimizer is instructed it must
+be first in the itinerary, and the independent Python validator enforces that
+ordering itself rather than trusting Claude to comply. Leave the field blank
+to fall back to the original behavior: the route just begins at whichever
+stop Claude picks first, with no dedicated depot leg.
 
 ## Notes
 

@@ -1,16 +1,19 @@
 """Streamlit app: Travel Optimization AI Agent.
 
-Lets a user define stops as real addresses with real time windows, geocodes
-them, fetches real travel times from a routing API, then runs a Claude
-tool-use agent that iteratively proposes, validates, and refines an
-optimized itinerary.
+Two ways to build a trip:
+- Load Scenario: pick one of three preloaded sample scenarios.
+- Custom Stops: build your own list of real addresses with time windows,
+  plus an optional fixed start location.
+
+Both paths converge on the same pipeline: geocode addresses, fetch real
+travel times, run the Claude tool-use agent, and render the same results.
 """
 
 from __future__ import annotations
 
 import os
 from datetime import date, time as dtime
-from typing import Optional
+from typing import Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
@@ -57,34 +60,29 @@ def _time_to_hhmm(value) -> Optional[str]:
     return None
 
 
-def _stops_to_df(stops: list[Stop]) -> pd.DataFrame:
-    return pd.DataFrame(
-        [
-            {
-                "name": s.name,
-                "address": s.address,
-                "earliest": _hhmm_to_time(s.earliest) or dtime(0, 0),
-                "latest": _hhmm_to_time(s.latest) or dtime(23, 59),
-                "duration_minutes": s.duration_minutes,
-            }
-            for s in stops
-        ]
-    )
+def _parse_budget_hours(value: str) -> Optional[int]:
+    try:
+        hours = float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    if hours <= 0:
+        return None
+    return int(round(hours * 60))
 
 
-def _df_to_stops(df: pd.DataFrame) -> list[Stop]:
+def _custom_entries_to_stops(entries: List[Dict]) -> List[Stop]:
     stops = []
-    for _, row in df.iterrows():
-        name = str(row.get("name") or "").strip()
-        if not name:
+    for i, e in enumerate(entries, start=1):
+        address = (e.get("address") or "").strip()
+        if not address:
             continue
         stops.append(
             Stop(
-                name=name,
-                address=str(row.get("address") or "").strip(),
-                earliest=_time_to_hhmm(row.get("earliest")),
-                latest=_time_to_hhmm(row.get("latest")),
-                duration_minutes=int(row.get("duration_minutes") or 30),
+                name=f"Stop {i}",
+                address=address,
+                earliest=_time_to_hhmm(e.get("earliest")),
+                latest=_time_to_hhmm(e.get("latest")),
+                duration_minutes=int(e.get("duration_minutes") or 30),
             )
         )
     return stops
@@ -104,79 +102,211 @@ def _validate_stop_inputs(stops: list[Stop], total_budget_minutes: int) -> list[
             errors.append(f"Stop '{s.name}': both an earliest and a latest time are required.")
         elif try_parse_hhmm(s.earliest) > try_parse_hhmm(s.latest):
             errors.append(f"Stop '{s.name}': earliest time must be before latest time.")
-        if s.duration_minutes <= 0:
+        if s.duration_minutes <= 0 and not s.is_start:
             errors.append(f"Stop '{s.name}': visit duration must be positive.")
     if total_budget_minutes <= 0:
         errors.append("Total time budget must be positive.")
     return errors
 
 
-# --- session state defaults -------------------------------------------------
+def _run_pipeline(
+    stops: List[Stop],
+    start_time: str,
+    total_budget_minutes: int,
+    trip_date: date,
+    api_key: str,
+    model: str,
+    engine: str,
+    ors_api_key: str,
+    extra_errors: Optional[List[str]] = None,
+) -> None:
+    """Shared geocode -> route -> optimize pipeline used by both input modes."""
+    errors = list(extra_errors or [])
+    errors += _validate_stop_inputs(stops, total_budget_minutes)
+    if not api_key:
+        errors.append("An Anthropic API key is required.")
+    if errors:
+        st.session_state.result = None
+        for e in errors:
+            st.error(e)
+        return
 
-if "stops_df" not in st.session_state:
-    initial = load_scenario(get_scenario_names()[0])
-    st.session_state.stops_df = _stops_to_df(initial["stops"])
-    st.session_state.start_time = initial["start_time"]
-    st.session_state.total_budget_minutes = initial["total_budget_minutes"]
+    with st.spinner("Geocoding addresses..."):
+        geocode_errors = geocode_stops(stops)
+
+    if geocode_errors:
+        st.session_state.result = None
+        st.error("Could not geocode the following stop(s) — fix the address and try again:")
+        for e in geocode_errors:
+            st.error(f"• {e}")
+        return
+
+    with st.spinner(f"Fetching travel times ({engine.upper()})..."):
+        matrix = get_travel_matrix(stops, engine=engine, ors_api_key=ors_api_key)
+    if matrix.warning:
+        st.warning(matrix.warning)
+
+    with st.spinner(f"Running optimization agent ({model})..."):
+        agent = TravelOptimizationAgent(api_key=api_key, model=model)
+        try:
+            result = agent.optimize(
+                stops=stops,
+                start_time=start_time,
+                total_budget_minutes=total_budget_minutes,
+                matrix=matrix,
+                trip_date=trip_date.strftime("%A, %B %d, %Y"),
+            )
+            st.session_state.result = result
+            st.session_state.matrix = matrix
+            st.session_state.used_stops = stops
+            st.session_state.trip_date = trip_date
+        except Exception as exc:  # surfaced to the user, not swallowed
+            st.session_state.result = None
+            st.exception(exc)
+
+
+# --- session state defaults -------------------------------------------------
 
 if "trip_date" not in st.session_state:
     st.session_state.trip_date = date.today()
+if "start_time" not in st.session_state:
+    st.session_state.start_time = "09:00"
 if "result" not in st.session_state:
     st.session_state.result = None
 if "matrix" not in st.session_state:
     st.session_state.matrix = None
 if "used_stops" not in st.session_state:
     st.session_state.used_stops = None
-if "geocode_errors" not in st.session_state:
-    st.session_state.geocode_errors = None
+if "custom_stops" not in st.session_state:
+    st.session_state.custom_stops = [
+        {"id": 0, "address": "", "earliest": dtime(9, 0), "latest": dtime(17, 0), "duration_minutes": 30},
+        {"id": 1, "address": "", "earliest": dtime(9, 0), "latest": dtime(17, 0), "duration_minutes": 30},
+    ]
+if "custom_next_id" not in st.session_state:
+    st.session_state.custom_next_id = 2
+if "custom_start_location" not in st.session_state:
+    st.session_state.custom_start_location = ""
+if "custom_budget_hours" not in st.session_state:
+    st.session_state.custom_budget_hours = "8"
 
 
 # --- sidebar: trip setup -----------------------------------------------------
 
+scenario_run_stops = None
+scenario_run_budget = None
+custom_run_stops = None
+custom_run_budget = None
+custom_run_errors: List[str] = []
+
 with st.sidebar:
     st.header("🧭 Trip Setup")
 
-    scenario_name = st.selectbox("Sample scenario", get_scenario_names())
-    if st.button("Load scenario", use_container_width=True):
-        scenario = load_scenario(scenario_name)
-        st.session_state.stops_df = _stops_to_df(scenario["stops"])
-        st.session_state.start_time = scenario["start_time"]
-        st.session_state.total_budget_minutes = scenario["total_budget_minutes"]
-        st.session_state.result = None
-        st.rerun()
-
-    st.divider()
-    st.subheader("Stops")
-    st.caption(
-        "Enter a real address or place name per stop (e.g. \"Times Square, New York, NY\"). "
-        "It's geocoded to coordinates automatically when you click Optimize. Well-known "
-        "landmarks usually work, but if one fails to geocode, use its street address instead "
-        "(e.g. \"30 Rockefeller Plaza, New York, NY\" rather than \"Top of the Rock\")."
-    )
-    edited_df = st.data_editor(
-        st.session_state.stops_df,
-        num_rows="dynamic",
-        use_container_width=True,
-        column_config={
-            "name": st.column_config.TextColumn("Name", required=True),
-            "address": st.column_config.TextColumn("Address / Place", required=True, width="large"),
-            "earliest": st.column_config.TimeColumn("Earliest", format="hh:mm a", step=300, required=True),
-            "latest": st.column_config.TimeColumn("Latest", format="hh:mm a", step=300, required=True),
-            "duration_minutes": st.column_config.NumberColumn("Visit (min)", min_value=1, step=5),
-        },
-        key="stops_editor",
-    )
-    st.session_state.stops_df = edited_df
-
-    st.divider()
     trip_date = st.date_input("Trip date", value=st.session_state.trip_date)
     start_time_widget = st.time_input(
         "Trip start time", value=_hhmm_to_time(st.session_state.start_time) or dtime(9, 0)
     )
     start_time = start_time_widget.strftime("%H:%M")
-    total_budget_minutes = st.number_input(
-        "Total time budget (minutes)", min_value=1, value=int(st.session_state.total_budget_minutes), step=15
-    )
+
+    st.divider()
+    tab1, tab2 = st.tabs(["📂 Load Scenario", "✏️ Custom Stops"])
+
+    with tab1:
+        scenario_name = st.selectbox("Select sample scenario", get_scenario_names())
+        preview = load_scenario(scenario_name)
+        with st.expander("Scenario details", expanded=True):
+            st.caption(
+                f"Start time: {to_12h(preview['start_time'])} · "
+                f"Total budget: {preview['total_budget_minutes'] / 60:.1f} hours"
+            )
+            st.dataframe(
+                pd.DataFrame(
+                    [
+                        {
+                            "Stop": s.name,
+                            "Address": s.address,
+                            "Earliest": to_12h(s.earliest),
+                            "Latest": to_12h(s.latest),
+                            "Visit (min)": s.duration_minutes,
+                        }
+                        for s in preview["stops"]
+                    ]
+                ),
+                width="stretch",
+                hide_index=True,
+            )
+        if st.button("📂 Load This Scenario", type="primary", width="stretch"):
+            scenario_run_stops = preview["stops"]
+            scenario_run_budget = preview["total_budget_minutes"]
+            start_time = preview["start_time"]
+            st.session_state.start_time = preview["start_time"]
+
+    with tab2:
+        st.session_state.custom_start_location = st.text_input(
+            "Start location (optional)",
+            value=st.session_state.custom_start_location,
+            placeholder="e.g. Times Square, NYC",
+            help="If set, the route must begin here — real travel time to your first stop is included.",
+        )
+        st.session_state.custom_budget_hours = st.text_input(
+            "Total time budget (hours)", value=st.session_state.custom_budget_hours
+        )
+
+        st.caption("Stops — address, arrival window, and how long you'll spend there:")
+        for i, entry in enumerate(st.session_state.custom_stops):
+            cols = st.columns([5, 2, 2, 2, 1])
+            entry["address"] = cols[0].text_input(
+                f"Stop {i + 1} address",
+                value=entry["address"],
+                key=f"custom_addr_{entry['id']}",
+                placeholder="e.g. 350 5th Ave, New York, NY",
+                label_visibility="collapsed" if i > 0 else "visible",
+            )
+            entry["earliest"] = cols[1].time_input(
+                "Earliest", value=entry["earliest"], key=f"custom_earliest_{entry['id']}",
+                label_visibility="collapsed" if i > 0 else "visible",
+            )
+            entry["latest"] = cols[2].time_input(
+                "Latest", value=entry["latest"], key=f"custom_latest_{entry['id']}",
+                label_visibility="collapsed" if i > 0 else "visible",
+            )
+            entry["duration_minutes"] = cols[3].number_input(
+                "Service (min)", min_value=1, value=entry["duration_minutes"], step=5,
+                key=f"custom_dur_{entry['id']}", label_visibility="collapsed" if i > 0 else "visible",
+            )
+            if cols[4].button("🗑️", key=f"custom_remove_{entry['id']}", help="Remove this stop"):
+                st.session_state.custom_stops = [
+                    e for e in st.session_state.custom_stops if e["id"] != entry["id"]
+                ]
+                st.rerun()
+
+        if st.button("➕ Add Stop", width="stretch"):
+            new_id = st.session_state.custom_next_id
+            st.session_state.custom_stops.append(
+                {"id": new_id, "address": "", "earliest": dtime(9, 0), "latest": dtime(17, 0), "duration_minutes": 30}
+            )
+            st.session_state.custom_next_id = new_id + 1
+            st.rerun()
+
+        st.divider()
+        if st.button("🚀 Optimize", type="primary", width="stretch"):
+            budget_minutes = _parse_budget_hours(st.session_state.custom_budget_hours)
+            if budget_minutes is None:
+                custom_run_errors.append("Total time budget must be a positive number of hours (e.g. 6 or 7.5).")
+            real_stops = _custom_entries_to_stops(st.session_state.custom_stops)
+            start_addr = st.session_state.custom_start_location.strip()
+            if start_addr:
+                real_stops = [
+                    Stop(
+                        name="Start Location",
+                        address=start_addr,
+                        earliest=start_time,
+                        latest=start_time,
+                        duration_minutes=0,
+                        is_start=True,
+                    )
+                ] + real_stops
+            custom_run_stops = real_stops
+            custom_run_budget = budget_minutes or 0
 
     st.divider()
     st.subheader("Routing API")
@@ -203,64 +333,26 @@ with st.sidebar:
     api_key = st.text_input("Anthropic API key", value=_default_api_key(), type="password")
     model = st.selectbox("Model", MODEL_OPTIONS, index=0)
 
-    st.divider()
-    optimize_clicked = st.button("🚀 Optimize Route", type="primary", use_container_width=True)
+
+# --- run the pipeline for whichever tab triggered it -------------------------
+
+if scenario_run_stops is not None:
+    _run_pipeline(scenario_run_stops, start_time, scenario_run_budget, trip_date, api_key, model, engine, ors_api_key)
+elif custom_run_stops is not None:
+    _run_pipeline(
+        custom_run_stops, start_time, custom_run_budget, trip_date, api_key, model, engine, ors_api_key,
+        extra_errors=custom_run_errors,
+    )
 
 
 # --- main area ----------------------------------------------------------------
 
 st.title("🧭 Travel Optimization AI Agent")
 st.caption(
-    "Give it real addresses with time windows, geocode + fetch real travel times, and let a Claude "
-    f"agent iteratively sequence and validate the itinerary (up to {MAX_ITERATIONS} refinement passes)."
+    "Load a sample scenario or build your own stops with real addresses and time windows, then let a "
+    f"Claude agent geocode, fetch real travel times, and iteratively optimize the route (up to "
+    f"{MAX_ITERATIONS} refinement passes)."
 )
-
-if optimize_clicked:
-    st.session_state.trip_date = trip_date
-    st.session_state.start_time = start_time
-    st.session_state.total_budget_minutes = int(total_budget_minutes)
-
-    stops = _df_to_stops(st.session_state.stops_df)
-    errors = _validate_stop_inputs(stops, int(total_budget_minutes))
-    if not api_key:
-        errors.append("An Anthropic API key is required.")
-    if errors:
-        st.session_state.result = None
-        for e in errors:
-            st.error(e)
-    else:
-        with st.spinner("Geocoding addresses..."):
-            geocode_errors = geocode_stops(stops)
-        st.session_state.geocode_errors = geocode_errors
-
-        if geocode_errors:
-            st.session_state.result = None
-            st.error("Could not geocode the following stop(s) — fix the address and try again:")
-            for e in geocode_errors:
-                st.error(f"• {e}")
-        else:
-            with st.spinner(f"Fetching travel times ({engine.upper()})..."):
-                matrix = get_travel_matrix(stops, engine=engine, ors_api_key=ors_api_key)
-            if matrix.warning:
-                st.warning(matrix.warning)
-
-            with st.spinner(f"Running optimization agent ({model})..."):
-                agent = TravelOptimizationAgent(api_key=api_key, model=model)
-                try:
-                    result = agent.optimize(
-                        stops=stops,
-                        start_time=start_time,
-                        total_budget_minutes=int(total_budget_minutes),
-                        matrix=matrix,
-                        trip_date=trip_date.strftime("%A, %B %d, %Y"),
-                    )
-                    st.session_state.result = result
-                    st.session_state.matrix = matrix
-                    st.session_state.used_stops = stops
-                except Exception as exc:  # surfaced to the user, not swallowed
-                    st.session_state.result = None
-                    st.exception(exc)
-
 
 result = st.session_state.result
 
@@ -334,7 +426,7 @@ if result is not None:
             prev_stop = name
 
         itinerary_df = pd.DataFrame(rows)
-        st.dataframe(itinerary_df, use_container_width=True, hide_index=True)
+        st.dataframe(itinerary_df, width="stretch", hide_index=True)
 
         final_violations = result.iterations[-1].violations if result.iterations else []
         total_service_min = sum(s.duration_minutes for s in stops)
@@ -377,4 +469,7 @@ if result is not None:
             mime="text/csv",
         )
 else:
-    st.info("Set up your stops with real addresses in the sidebar and click **Optimize Route** to run the agent.")
+    st.info(
+        "Load a sample scenario or build custom stops in the sidebar, then click "
+        "**Load This Scenario** or **Optimize** to run the agent."
+    )

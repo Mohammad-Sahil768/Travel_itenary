@@ -19,6 +19,7 @@ class Stop:
     earliest: Optional[str] = None  # "HH:MM", inclusive lower bound on arrival
     latest: Optional[str] = None  # "HH:MM", inclusive upper bound on departure
     duration_minutes: int = 30  # time to spend at the stop
+    is_start: bool = False  # a fixed depot/origin that must be first in the itinerary
 
     def has_coords(self) -> bool:
         return self.lat is not None and self.lon is not None
