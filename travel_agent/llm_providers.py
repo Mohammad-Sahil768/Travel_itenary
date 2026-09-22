@@ -1,8 +1,8 @@
 """The LLM backend for the optimization agent, via LangChain.
 
-Talks to TCS GenAI Lab's OpenAI-compatible gateway (an internal endpoint
-serving DeepSeek-V3) through langchain_openai.ChatOpenAI, using LangChain's
-native tool-calling (bind_tools) so the agent's tool-use loop in agent.py is
+Talks to Google AI Studio's Gemini API through its OpenAI-compatibility
+endpoint, using langchain_openai.ChatOpenAI with LangChain's native
+tool-calling (bind_tools) so the agent's tool-use loop in agent.py is
 unchanged: it still just calls backend.send(text, ...) and gets back text +
 any tool calls the model made, exactly as before.
 """
@@ -53,24 +53,16 @@ def _openai_tool_defs() -> List[Dict]:
 
 class LangChainBackend:
     """Wraps langchain_openai.ChatOpenAI pointed at an OpenAI-compatible
-    gateway (TCS GenAI Lab). `base_url`/`model` come from the caller
-    (see travel_agent.agent's constants) rather than being hardcoded here,
-    so this class stays reusable if that endpoint ever changes.
-
-    verify=False on the underlying httpx client disables TLS certificate
-    verification. This is required for TCS GenAI Lab's gateway (it presents
-    a certificate the standard trust store doesn't recognize, common for
-    internal enterprise API gateways) but it does weaken the connection
-    against a man-in-the-middle on the network path to that host — this is
-    a deliberate trade-off for this specific internal endpoint, not a
-    general-purpose default.
+    endpoint (Google AI Studio's Gemini API). `base_url`/`model` come from
+    the caller (see travel_agent.agent's constants) rather than being
+    hardcoded here, so this class stays reusable if that endpoint changes.
     """
 
     def __init__(self, api_key: str, model: str, system_prompt: str, base_url: Optional[str] = None):
         # Bounded on both the transport and the client itself so a stuck/slow
-        # gateway or model fails with a clear error instead of hanging the
-        # Streamlit session forever.
-        http_client = httpx.Client(verify=False, timeout=REQUEST_TIMEOUT_SECONDS)  # noqa: S501 -- required by TCS GenAI Lab's gateway cert
+        # backend fails with a clear error instead of hanging the Streamlit
+        # session forever.
+        http_client = httpx.Client(timeout=REQUEST_TIMEOUT_SECONDS)
         self.llm = ChatOpenAI(
             base_url=base_url,
             model=model,

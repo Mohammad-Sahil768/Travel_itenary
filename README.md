@@ -2,11 +2,11 @@
 
 A Streamlit app that sequences a list of stops (each with a time window and a
 required visit duration) into an optimized itinerary. An LLM tool-use agent —
-served through **TCS GenAI Lab's internal gateway via LangChain** — fetches
-real travel times and validates its own plan, refining it over up to 3
-iterations until every constraint is satisfied. You only ever provide an API
-key — the provider, model, and endpoint are fixed in code, not a sidebar
-choice.
+served through **Google AI Studio's free-tier Gemini API via LangChain** —
+fetches real travel times and validates its own plan, refining it over up to
+3 iterations until every constraint is satisfied. You only ever provide an
+API key — the provider, model, and endpoint are fixed in code, not a
+sidebar choice.
 
 ## How it works
 
@@ -87,84 +87,49 @@ earliest/latest still can't express "this stop's window is on day 2."
   scheduling and display, not to change the travel-time numbers. Don't treat
   travel times as guarantees, especially around rush hour.
 
-## LLM backend: TCS GenAI Lab via LangChain
+## LLM backend: Google AI Studio via LangChain
 
 The sidebar only ever asks for an **API Key** — there's no provider or model
 dropdown. Internally, `travel_agent/agent.py` hardcodes:
 
 ```python
-DEFAULT_PROVIDER = "tcs_genai_lab"
-DEFAULT_MODEL = "azure/genailab-maas-gpt-4o"
-DEFAULT_BASE_URL = "https://genailab.tcs.in/v1"
+DEFAULT_PROVIDER = "google_ai_studio"
+DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 ```
 
 `app.py` imports these as `PROVIDER`/`MODEL`/`BASE_URL` and never lets the
 user override them. The actual call is made by
 `travel_agent/llm_providers.py`'s `LangChainBackend`, which wraps
 [`langchain_openai.ChatOpenAI`](https://python.langchain.com/docs/integrations/chat/openai/)
-pointed at that endpoint, using LangChain's native `bind_tools()` so the
-agent's tool-calling loop (`get_travel_time` / `validate_constraints`) works
-exactly as it does for any other backend — `agent.py`'s outer refine loop,
-the JSON contract, and the independent constraint validation are completely
+pointed at Google's [OpenAI-compatibility endpoint](https://ai.google.dev/gemini-api/docs/openai)
+for the Gemini API, using LangChain's native `bind_tools()` so the agent's
+tool-calling loop (`get_travel_time` / `validate_constraints`) works exactly
+as it does for any other backend — `agent.py`'s outer refine loop, the JSON
+contract, and the independent constraint validation are completely
 unchanged by this swap.
 
-⚠️ **`DEFAULT_BASE_URL` must include the `/v1` suffix.** The `openai`
-client (which `ChatOpenAI` wraps) builds the actual request URL as
-`base_url + "/chat/completions"`. Without `/v1`, that resolves to
-`.../chat/completions` — a *different* registered route on this gateway
-than `.../v1/chat/completions`, with a more restrictive RBAC policy. This
-caused a real, confusing bug during setup: direct `curl`/`httpx` tests
-against `.../v1/chat/completions` succeeded for a model this account got
-`"RBAC: access denied"` on *through the app* — because the app was
-silently hitting the unversioned path the whole time. If you ever see the
-app and a raw API test disagree on the same key/model, check this first.
+**Get a free-tier key** at [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
+(a Google account is all that's needed — no billing setup required for the
+free tier). Paste it into the sidebar's **API Key** field.
 
-**Model access on TCS GenAI Lab is per-account (RBAC), not universal** — not
-every key can use every model on the list. A full sweep of this account's
-model list during setup found: the three native Azure OpenAI models
-(`gpt-35-turbo`, `gpt-4o`, `gpt-4o-mini`) all work; every `azure_ai/`
-model (DeepSeek-R1, DeepSeek-V3, the Llama variants, the Phi variants)
-came back 404, bad request, or RBAC-denied for this account — and
-DeepSeek-V3 specifically also hit a transient `429 No deployments
-available` at one point along the way, before that RBAC picture became
-clear. `DEFAULT_MODEL` is `gpt-4o`, picked among the three working models
-for the most reliable tool-calling on this app's structured JSON +
-multi-tool loop; `gpt-4o-mini` is a valid cheaper/faster alternative if
-you want to trade some reliability for cost. If your account is
-authorized for different models, change `DEFAULT_MODEL` (prefix `azure/`
-for classic Azure OpenAI deployments like the gpt-* family, `azure_ai/`
-for Azure AI Foundry "Models as a Service" like DeepSeek/Llama/Phi) — an
-RBAC-denied result means asking whoever administers your TCS GenAI Lab
-account for access, not a code change.
+This is a normal public API: a properly-trusted TLS certificate (no
+`verify=False` workaround needed, unlike an internal enterprise gateway)
+and reachable from anywhere with internet access, including Streamlit
+Community Cloud. Both the underlying `httpx.Client` and `ChatOpenAI` have
+an explicit 60-second timeout, so a slow or overloaded backend fails with a
+clear error instead of hanging the Streamlit session.
 
-⚠️ **TLS verification is disabled for this endpoint**
-(`httpx.Client(verify=False)`, per the spec this was built from). This is
-apparently required because TCS GenAI Lab's gateway presents a certificate
-the standard trust store doesn't recognize — common for internal enterprise
-API gateways — but it does mean the connection to `genailab.tcs.in` isn't
-protected against a man-in-the-middle on that network path. This is a
-deliberate trade-off for this one specific internal endpoint, not a general
-security posture; don't copy this pattern for a public-internet API.
-
-Both calls (the underlying `httpx.Client` and `ChatOpenAI` itself) also have
-an explicit 60-second timeout, so a slow or overloaded model backend fails
-with a clear error instead of hanging the Streamlit session indefinitely —
-this was found and fixed after exactly that happened during setup.
-
-Live testing confirmed `genailab.tcs.in` is actually reachable and resolves
-to a real public IP (backed by a LiteLLM Proxy server) — the earlier caveat
-here about it being VPN/intranet-only wasn't borne out, at least from a
-TCS-managed machine. Whether it's reachable from fully outside any TCS
-network (e.g. Streamlit Community Cloud) is still untested.
-
-⚠️ Note on the spec this was built from: it named `claude-3-5-sonnet-20241022`
-as an earlier "keep Anthropic" hardcode in a prior iteration of this app —
-now fully replaced by the TCS GenAI Lab setup above, per this change's own
-explicit request to remove the Anthropic SDK entirely.
+⚠️ `gemini-2.5-flash` is Google's current default free-tier flash model as
+of when this was written; Google's model names shift over time. If
+`DEFAULT_MODEL` ever comes back "model not found," the well-established
+`gemini-2.0-flash` is a safe fallback — check
+[Google's model list](https://ai.google.dev/gemini-api/docs/models) for
+the current free-tier lineup.
 
 **Your key never touches disk** — it lives only in Streamlit's in-memory
 `st.session_state` for the browser tab's session; it's not written to a file
-or logged. It *is* sent to the TCS GenAI Lab endpoint above.
+or logged. It *is* sent to Google's API.
 
 **API key validation** — clicking **🔑 Test API Key**, or clicking **Load
 This Scenario** / **Optimize**, always makes one minimal test call first
@@ -172,17 +137,29 @@ This Scenario** / **Optimize**, always makes one minimal test call first
 optimization run. A bad key is reported immediately instead of failing deep
 into the pipeline.
 
+### Why this app went through Anthropic → TCS GenAI Lab → Google AI Studio
+
+Worth knowing if you're picking this project back up: this app's LLM
+backend was originally Anthropic Claude, then swapped to TCS GenAI Lab (an
+internal enterprise gateway) per a specific request, then to Google AI
+Studio after real, extended debugging of TCS's gateway (a `/v1` path
+mismatch causing confusing RBAC-denied errors, then per-account model
+authorization limits) made it worth trying a simpler, fully public
+alternative. None of that architecture churn touched `agent.py`'s outer
+loop, `tools.py`, or the JSON contract — only `travel_agent/llm_providers.py`
+and a few constants in `travel_agent/agent.py` changed each time. If TCS
+GenAI Lab access issues get resolved on your account and you want to swap
+back, that's the same small, contained set of files to touch.
+
 ## Running locally
 
 ```bash
 pip install -r requirements.txt
-export TCS_GENAI_API_KEY=...
+export GOOGLE_API_KEY=...
 streamlit run app.py
 ```
 
 Or paste the API key directly into the sidebar's **API Key** field at runtime.
-Note the network caveat above — this generally needs to run somewhere with
-access to TCS's internal network to actually reach the endpoint.
 
 ## Deploying to Streamlit Community Cloud
 
@@ -191,11 +168,11 @@ access to TCS's internal network to actually reach the endpoint.
    pointing at this repo and `app.py`.
 3. In the app's **Settings → Secrets**, add:
    ```toml
-   TCS_GENAI_API_KEY = "..."
+   GOOGLE_API_KEY = "..."
    ```
-4. Deploy. `requirements.txt` is picked up automatically. (Streamlit
-   Community Cloud runs on the public internet — see the network caveat
-   above about whether it can actually reach `genailab.tcs.in` from there.)
+4. Deploy. `requirements.txt` is picked up automatically. Google's API is
+   fully public, so this works the same on Streamlit Community Cloud as
+   it does locally — no network/VPN caveat this time.
 
 ## Project layout
 
@@ -206,7 +183,7 @@ travel_agent/
   geocoding.py              Nominatim (OpenStreetMap) address -> coordinates, with caching
   routing.py                OSRM / OpenRouteService clients + haversine fallback
   tools.py                  Tool schemas + get_travel_time / validate_constraints
-  llm_providers.py          LangChainBackend: ChatOpenAI -> TCS GenAI Lab, with tool-calling
+  llm_providers.py          LangChainBackend: ChatOpenAI -> Google AI Studio, with tool-calling
   agent.py                  The provider-agnostic tool-use optimization loop
   sample_data.py            3 preloaded scenarios (Urban, Regional, Same-day), given as real addresses
 ```

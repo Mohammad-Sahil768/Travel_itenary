@@ -22,24 +22,16 @@ from .models import Stop
 from .routing import TravelMatrix
 from .tools import validate_constraints
 
-# TCS GenAI Lab: an internal OpenAI-compatible gateway. A full sweep of every
-# model on this account's list found only the native Azure OpenAI models
-# (gpt-35-turbo, gpt-4o, gpt-4o-mini) actually working -- every azure_ai/
-# (DeepSeek/Llama/Phi) model returned 404/bad request/RBAC-denied for this
-# account. gpt-4o chosen among the three working models for its stronger
-# tool-calling reliability on this app's structured JSON + multi-tool loop.
-#
-# DEFAULT_BASE_URL MUST include the /v1 suffix. The openai client (which
-# ChatOpenAI wraps) composes the actual request URL as base_url + "/chat/
-# completions" -- without /v1 that resolves to .../chat/completions, a
-# *different* registered route on this gateway than .../v1/chat/completions
-# with its own (more restrictive) RBAC policy. This cost real debugging
-# time: live curl/httpx tests against .../v1/chat/completions worked fine
-# for a model this account got "RBAC: access denied" on through the app,
-# because the app was silently hitting the unversioned path instead.
-DEFAULT_PROVIDER = "tcs_genai_lab"
-DEFAULT_MODEL = "azure/genailab-maas-gpt-4o"
-DEFAULT_BASE_URL = "https://genailab.tcs.in/v1"
+# Google AI Studio's Gemini API, via its OpenAI-compatibility endpoint --
+# a normal public API (properly-trusted TLS cert, no verify=False hack
+# needed, reachable from anywhere including Streamlit Community Cloud),
+# reached with a free-tier key from https://aistudio.google.com/apikey.
+# gemini-2.5-flash is Google's current default free-tier flash model; if
+# it 404s as an unknown model (Google's naming shifts over time), the
+# well-established "gemini-2.0-flash" is the fallback to try.
+DEFAULT_PROVIDER = "google_ai_studio"
+DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 MAX_ITERATIONS = 3
 
 SYSTEM_PROMPT = """You are a Travel Optimization AI Agent. You sequence a fixed list of \
