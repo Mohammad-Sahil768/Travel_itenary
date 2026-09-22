@@ -1,10 +1,10 @@
 # Travel Optimization AI Agent
 
 A Streamlit app that sequences a list of stops (each with a time window and a
-required visit duration) into an optimized itinerary. An LLM tool-use agent —
-Anthropic Claude, OpenAI GPT, or any OpenAI-compatible "other" provider you
-point it at — fetches real travel times and validates its own plan, refining
-it over up to 3 iterations until every constraint is satisfied.
+required visit duration) into an optimized itinerary. A Claude tool-use agent
+fetches real travel times and validates its own plan, refining it over up to
+3 iterations until every constraint is satisfied. You only ever provide an
+API key — the provider and model are fixed in code, not a sidebar choice.
 
 ## How it works
 
@@ -42,7 +42,7 @@ it over up to 3 iterations until every constraint is satisfied.
    distance matrix. If the API is unreachable, it falls back to a
    haversine-distance estimate (clearly flagged in the UI) so the app still
    runs.
-4. **LLM agent loop** — the chosen model is given the stops, constraints, and
+4. **Claude agent loop** — the model is given the stops, constraints, and
    travel matrix, and can call two tools:
    - `get_travel_time(from_stop, to_stop)` — look up real travel time/distance.
    - `validate_constraints(itinerary)` — check a candidate plan for violations.
@@ -50,9 +50,7 @@ it over up to 3 iterations until every constraint is satisfied.
    It proposes a sequence, timing, and confidence score as JSON. The app
    *independently* re-validates that JSON in Python (never just trusting the
    model's self-report). If violations remain, the specific failures are sent
-   back and it tries again — up to 3 iterations total. This whole loop, the
-   JSON contract, and the validation logic are identical regardless of
-   provider — see "Multi-provider support" below for what actually differs.
+   back and it tries again — up to 3 iterations total.
 5. **Results** — an expandable "Agent Reasoning" panel shows each iteration's
    reasoning, tool calls, and violations. A "Geocoded locations" panel shows
    exactly what address each stop resolved to (so you can catch a wrong match,
@@ -87,70 +85,63 @@ earliest/latest still can't express "this stop's window is on day 2."
   scheduling and display, not to change the travel-time numbers. Don't treat
   travel times as guarantees, especially around rush hour.
 
-## Multi-provider support
+## Provider and model are fixed, not user-selectable
 
-The sidebar's **LLM Provider** section has three options:
+The sidebar only ever asks for an **Anthropic API key** — there's no
+provider or model dropdown. Internally, `app.py` hardcodes:
 
-- **Anthropic (Claude)** — `claude-opus-5` / `claude-sonnet-5` / `claude-haiku-4-5`,
-  via the `anthropic` SDK's Messages API (native tool use, extended thinking
-  surfaced as the "reasoning summary" in the Agent Reasoning panel).
-- **OpenAI (GPT)** — `gpt-4` / `gpt-3.5-turbo`, via the `openai` SDK's Chat
-  Completions API (function calling). No reasoning summary — these models
-  don't expose one.
-- **Other LLM** — any OpenAI-compatible `/v1/chat/completions` endpoint with
-  function-calling support (Together, Groq, OpenRouter, a local vLLM/Ollama
-  server, etc.), reached with a model name **and a base URL** you provide.
-  There's no single universal LLM protocol, so this is the broadest concrete
-  meaning of "generic endpoint" that actually works end-to-end.
+```python
+PROVIDER = "anthropic"
+MODEL = DEFAULT_MODEL  # "claude-opus-5", from travel_agent/agent.py
+```
 
-All three run through the exact same `TravelOptimizationAgent.optimize()`
-loop in `agent.py` — provider differences are isolated to
-`travel_agent/llm_providers.py`, which exposes one tiny interface
-(`validate()` / `send(text)`) per provider. Nothing else in the app,
-including the tools, the JSON contract, or the constraint validation, knows
-or cares which provider is active.
+⚠️ Note on the spec this was built from: it named `claude-3-5-sonnet-20241022`
+as the hardcoded model — a dated snapshot one generation behind what this
+app already uses elsewhere. Rather than reintroduce an aging/soon-retired
+model ID, the hardcode points at the same current default (`claude-opus-5`)
+already used throughout this app. Change the `MODEL` constant near the top
+of `app.py` if you want a different fixed model.
+
+The app can still technically talk to other OpenAI-compatible providers —
+`travel_agent/llm_providers.py` and `TravelOptimizationAgent`'s
+`provider`/`base_url` parameters are untouched, since removing the *frontend*
+picker doesn't require deleting the working backend abstraction behind it —
+but nothing in the UI exposes that anymore.
 
 **Your key never touches disk** — it lives only in Streamlit's in-memory
 `st.session_state` for the browser tab's session; it's not written to a file
-or logged. It *is* sent to whichever provider's API you selected (and to
-your own `base_url` if you set one for "Other") — only use a base URL you
-trust.
+or logged. It *is* sent to Anthropic's API.
 
 **API key validation** — clicking **🔑 Test API Key**, or clicking **Load
-This Scenario** / **Optimize**, always makes one minimal test call to the
-selected provider first (`max_tokens`/`max_completion_tokens` capped low,
-no tools attached) before spending anything on geocoding or the real
-optimization run. A bad key, wrong model name, or unreachable base URL is
-reported immediately instead of failing deep into the pipeline.
-
-⚠️ Note on the spec this feature was built from: the original ask listed
-`claude-3-sonnet-20240229` as the Anthropic default — that model has been
-retired. The Anthropic dropdown keeps the current models already used
-elsewhere in this app (`claude-opus-5` default) instead of reintroducing a
-dead model ID.
+This Scenario** / **Optimize**, always makes one minimal test call first
+(`max_tokens` capped low, no tools attached) before spending anything on
+geocoding or the real optimization run. A bad key is reported immediately
+instead of failing deep into the pipeline.
 
 ## Running locally
 
 ```bash
 pip install -r requirements.txt
-export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY, depending on provider
+export ANTHROPIC_API_KEY=sk-ant-...
 streamlit run app.py
 ```
 
-Or paste the API key directly into the sidebar field at runtime — either
-way, whichever provider you pick reads its key from that one sidebar field.
+Or paste the API key directly into the sidebar's **Anthropic API key** field
+at runtime.
 
 ## Deploying to Streamlit Community Cloud
 
 1. Push this repo to GitHub.
 2. On [share.streamlit.io](https://share.streamlit.io), create a new app
    pointing at this repo and `app.py`.
-3. In the app's **Settings → Secrets**, add whichever provider(s) you'll use:
+3. In the app's **Settings → Secrets**, add:
    ```toml
    ANTHROPIC_API_KEY = "sk-ant-..."
-   OPENAI_API_KEY = "sk-..."
    ```
-4. Deploy. `requirements.txt` is picked up automatically.
+4. Deploy. `requirements.txt` is picked up automatically (`openai` is still
+   a listed dependency even though the UI no longer exposes it — see
+   "Provider and model are fixed" above; the module that imports it is
+   always loaded).
 
 ## Project layout
 
@@ -187,8 +178,8 @@ stop Claude picks first, with no dedicated depot leg.
 - The public OSRM demo server is rate-limited and driving-only; for production
   use, self-host OSRM or use OpenRouteService with your own key.
 - Each optimization run makes 1–3 outer iterations, each with a handful of
-  LLM tool-use turns — factor that into API cost when testing with larger
-  stop lists, on whichever provider you've selected.
+  Claude tool-use turns — factor that into API cost when testing with larger
+  stop lists.
 - Nominatim's usage policy caps unauthenticated geocoding at ~1 request/second;
   the app respects that with a rate limiter and caches resolved addresses in
   memory for the life of the process, so editing one stop and re-optimizing
