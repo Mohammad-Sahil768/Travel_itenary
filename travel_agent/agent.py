@@ -28,9 +28,18 @@ from .tools import validate_constraints
 # (DeepSeek/Llama/Phi) model returned 404/bad request/RBAC-denied for this
 # account. gpt-4o chosen among the three working models for its stronger
 # tool-calling reliability on this app's structured JSON + multi-tool loop.
+#
+# DEFAULT_BASE_URL MUST include the /v1 suffix. The openai client (which
+# ChatOpenAI wraps) composes the actual request URL as base_url + "/chat/
+# completions" -- without /v1 that resolves to .../chat/completions, a
+# *different* registered route on this gateway than .../v1/chat/completions
+# with its own (more restrictive) RBAC policy. This cost real debugging
+# time: live curl/httpx tests against .../v1/chat/completions worked fine
+# for a model this account got "RBAC: access denied" on through the app,
+# because the app was silently hitting the unversioned path instead.
 DEFAULT_PROVIDER = "tcs_genai_lab"
 DEFAULT_MODEL = "azure/genailab-maas-gpt-4o"
-DEFAULT_BASE_URL = "https://genailab.tcs.in"
+DEFAULT_BASE_URL = "https://genailab.tcs.in/v1"
 MAX_ITERATIONS = 3
 
 SYSTEM_PROMPT = """You are a Travel Optimization AI Agent. You sequence a fixed list of \

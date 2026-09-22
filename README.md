@@ -95,7 +95,7 @@ dropdown. Internally, `travel_agent/agent.py` hardcodes:
 ```python
 DEFAULT_PROVIDER = "tcs_genai_lab"
 DEFAULT_MODEL = "azure/genailab-maas-gpt-4o"
-DEFAULT_BASE_URL = "https://genailab.tcs.in"
+DEFAULT_BASE_URL = "https://genailab.tcs.in/v1"
 ```
 
 `app.py` imports these as `PROVIDER`/`MODEL`/`BASE_URL` and never lets the
@@ -107,6 +107,17 @@ agent's tool-calling loop (`get_travel_time` / `validate_constraints`) works
 exactly as it does for any other backend — `agent.py`'s outer refine loop,
 the JSON contract, and the independent constraint validation are completely
 unchanged by this swap.
+
+⚠️ **`DEFAULT_BASE_URL` must include the `/v1` suffix.** The `openai`
+client (which `ChatOpenAI` wraps) builds the actual request URL as
+`base_url + "/chat/completions"`. Without `/v1`, that resolves to
+`.../chat/completions` — a *different* registered route on this gateway
+than `.../v1/chat/completions`, with a more restrictive RBAC policy. This
+caused a real, confusing bug during setup: direct `curl`/`httpx` tests
+against `.../v1/chat/completions` succeeded for a model this account got
+`"RBAC: access denied"` on *through the app* — because the app was
+silently hitting the unversioned path the whole time. If you ever see the
+app and a raw API test disagree on the same key/model, check this first.
 
 **Model access on TCS GenAI Lab is per-account (RBAC), not universal** — not
 every key can use every model on the list. A full sweep of this account's
