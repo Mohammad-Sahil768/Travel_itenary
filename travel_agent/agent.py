@@ -17,15 +17,14 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-import anthropic
-
+from .llm_providers import ToolCallRecord, make_backend
 from .models import Stop
 from .routing import TravelMatrix
-from .tools import TOOL_DEFINITIONS, execute_tool, validate_constraints
+from .tools import validate_constraints
 
+DEFAULT_PROVIDER = "anthropic"
 DEFAULT_MODEL = "claude-opus-5"
 MAX_ITERATIONS = 3
-MAX_TOOL_ROUNDS_PER_ITERATION = 6  # guards against a runaway tool-call loop
 
 SYSTEM_PROMPT = """You are a Travel Optimization AI Agent. You sequence a fixed list of \
 stops into the best possible visiting order, respecting each stop's time window and the \
@@ -60,13 +59,6 @@ When you are done reasoning and tool-calling, respond with ONLY a single JSON ob
 Set "violations" to your own best-effort list (it will be independently re-checked), and \
 "confidence" to a 0.0-1.0 estimate of how good and how feasible this plan is.
 """
-
-
-@dataclass
-class ToolCallRecord:
-    name: str
-    input: Dict
-    result: Dict
 
 
 @dataclass
@@ -156,10 +148,31 @@ def _extract_json(text: str) -> Dict:
 
 
 class TravelOptimizationAgent:
-    def __init__(self, api_key: str, model: str = DEFAULT_MODEL, max_iterations: int = MAX_ITERATIONS):
-        self.client = anthropic.Anthropic(api_key=api_key)
+    """Runs the same propose -> validate -> refine loop regardless of which
+    LLM provider is backing it — only make_backend() differs per provider;
+    everything below (the JSON contract, tool execution, and independent
+    constraint validation) is shared."""
+
+    def __init__(
+        self,
+        provider: str = DEFAULT_PROVIDER,
+        api_key: str = "",
+        model: str = DEFAULT_MODEL,
+        base_url: Optional[str] = None,
+        max_iterations: int = MAX_ITERATIONS,
+    ):
+        self.provider = provider
+        self.api_key = api_key
         self.model = model
+        self.base_url = base_url
         self.max_iterations = max_iterations
+
+    def _make_backend(self):
+        return make_backend(self.provider, self.api_key, self.model, SYSTEM_PROMPT, base_url=self.base_url)
+
+    def validate_api_key(self) -> Optional[str]:
+        """Makes one small test call. Returns None if the key/model work, else an error message."""
+        return self._make_backend().validate()
 
     def optimize(
         self,
@@ -170,12 +183,8 @@ class TravelOptimizationAgent:
         trip_date: Optional[str] = None,
     ) -> OptimizationResult:
         stops_by_name = {s.name: s for s in stops}
-        messages: List[Dict] = [
-            {
-                "role": "user",
-                "content": _build_user_prompt(stops, start_time, total_budget_minutes, matrix, trip_date),
-            }
-        ]
+        backend = self._make_backend()
+        next_message = _build_user_prompt(stops, start_time, total_budget_minutes, matrix, trip_date)
 
         iterations: List[IterationRecord] = []
         final_plan: Optional[Dict] = None
@@ -183,38 +192,10 @@ class TravelOptimizationAgent:
 
         for i in range(1, self.max_iterations + 1):
             record = IterationRecord(index=i)
-            response = None
-
-            for _ in range(MAX_TOOL_ROUNDS_PER_ITERATION):
-                response = self.client.messages.create(
-                    model=self.model,
-                    max_tokens=16000,
-                    thinking={"type": "adaptive", "display": "summarized"},
-                    system=SYSTEM_PROMPT,
-                    tools=TOOL_DEFINITIONS,
-                    messages=messages,
-                )
-
-                for block in response.content:
-                    if block.type == "thinking" and getattr(block, "thinking", ""):
-                        record.thinking.append(block.thinking)
-                    elif block.type == "text" and block.text.strip():
-                        record.raw_text = block.text
-
-                messages.append({"role": "assistant", "content": response.content})
-
-                if response.stop_reason != "tool_use":
-                    break
-
-                tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
-                tool_results = []
-                for tb in tool_use_blocks:
-                    result = execute_tool(tb.name, tb.input, stops_by_name, matrix, total_budget_minutes)
-                    record.tool_calls.append(ToolCallRecord(name=tb.name, input=tb.input, result=result))
-                    tool_results.append(
-                        {"type": "tool_result", "tool_use_id": tb.id, "content": json.dumps(result)}
-                    )
-                messages.append({"role": "user", "content": tool_results})
+            turn = backend.send(next_message, stops_by_name, matrix, total_budget_minutes)
+            record.thinking = turn.thinking
+            record.tool_calls = turn.tool_calls
+            record.raw_text = turn.text
 
             if record.raw_text:
                 try:
@@ -222,7 +203,7 @@ class TravelOptimizationAgent:
                 except (ValueError, json.JSONDecodeError) as exc:
                     record.parse_error = str(exc)
             else:
-                record.parse_error = "Claude did not return a text response."
+                record.parse_error = f"{self.provider} did not return a text response."
 
             if record.parsed_plan is not None:
                 final_plan = record.parsed_plan
@@ -239,15 +220,10 @@ class TravelOptimizationAgent:
                 break
 
             if i < self.max_iterations:
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": (
-                            "These constraints failed: "
-                            f"{json.dumps(record.violations)}. "
-                            "Fix the itinerary and try again. Respond again with ONLY the final JSON object."
-                        ),
-                    }
+                next_message = (
+                    "These constraints failed: "
+                    f"{json.dumps(record.violations)}. "
+                    "Fix the itinerary and try again. Respond again with ONLY the final JSON object."
                 )
 
         return OptimizationResult(success=success, final_plan=final_plan, iterations=iterations, model=self.model)

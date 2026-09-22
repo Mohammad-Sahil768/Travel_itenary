@@ -6,7 +6,9 @@ Two ways to build a trip:
   plus an optional fixed start location.
 
 Both paths converge on the same pipeline: geocode addresses, fetch real
-travel times, run the Claude tool-use agent, and render the same results.
+travel times, run the tool-use agent (Anthropic Claude, OpenAI GPT, or any
+OpenAI-compatible "other" endpoint you supply a key/model/base URL for),
+and render the same results.
 """
 
 from __future__ import annotations
@@ -26,16 +28,26 @@ from travel_agent.sample_data import get_scenario_names, load_scenario
 
 st.set_page_config(page_title="Travel Optimization AI Agent", page_icon="🧭", layout="wide")
 
-MODEL_OPTIONS = ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"]
+PROVIDER_OPTIONS = {
+    "Anthropic (Claude)": "anthropic",
+    "OpenAI (GPT)": "openai",
+    "Other LLM": "other",
+}
+ANTHROPIC_MODELS = ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"]
+OPENAI_MODELS = ["gpt-4", "gpt-3.5-turbo"]
+PROVIDER_SECRET_NAMES = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY"}
 
 
-def _default_api_key() -> str:
+def _default_api_key(provider: str) -> str:
+    secret_name = PROVIDER_SECRET_NAMES.get(provider)
+    if not secret_name:
+        return ""
     try:
-        if "ANTHROPIC_API_KEY" in st.secrets:
-            return st.secrets["ANTHROPIC_API_KEY"]
+        if secret_name in st.secrets:
+            return st.secrets[secret_name]
     except Exception:
         pass
-    return os.environ.get("ANTHROPIC_API_KEY", "")
+    return os.environ.get(secret_name, "")
 
 
 def _hhmm_to_time(value: Optional[str]) -> Optional[dtime]:
@@ -114,21 +126,33 @@ def _run_pipeline(
     start_time: str,
     total_budget_minutes: int,
     trip_date: date,
+    provider: str,
     api_key: str,
     model: str,
+    base_url: Optional[str],
     engine: str,
     ors_api_key: str,
     extra_errors: Optional[List[str]] = None,
 ) -> None:
-    """Shared geocode -> route -> optimize pipeline used by both input modes."""
+    """Shared geocode -> route -> optimize pipeline used by both input modes and all LLM providers."""
     errors = list(extra_errors or [])
     errors += _validate_stop_inputs(stops, total_budget_minutes)
     if not api_key:
-        errors.append("An Anthropic API key is required.")
+        errors.append("An API key is required.")
+    if provider == "other" and not model:
+        errors.append("Enter a model name for the 'Other LLM' provider.")
     if errors:
         st.session_state.result = None
         for e in errors:
             st.error(e)
+        return
+
+    agent = TravelOptimizationAgent(provider=provider, api_key=api_key, model=model, base_url=base_url)
+    with st.spinner("Validating API key..."):
+        key_error = agent.validate_api_key()
+    if key_error:
+        st.session_state.result = None
+        st.error(f"API key validation failed: {key_error}")
         return
 
     with st.spinner("Geocoding addresses..."):
@@ -147,7 +171,6 @@ def _run_pipeline(
         st.warning(matrix.warning)
 
     with st.spinner(f"Running optimization agent ({model})..."):
-        agent = TravelOptimizationAgent(api_key=api_key, model=model)
         try:
             result = agent.optimize(
                 stops=stops,
@@ -329,18 +352,55 @@ with st.sidebar:
     )
 
     st.divider()
-    st.subheader("Claude Agent")
-    api_key = st.text_input("Anthropic API key", value=_default_api_key(), type="password")
-    model = st.selectbox("Model", MODEL_OPTIONS, index=0)
+    st.subheader("LLM Provider")
+    provider_label = st.selectbox("API Provider", list(PROVIDER_OPTIONS.keys()))
+    provider = PROVIDER_OPTIONS[provider_label]
+
+    api_key = st.text_input(
+        f"{provider_label} API key", value=_default_api_key(provider), type="password"
+    )
+
+    base_url: Optional[str] = None
+    if provider == "anthropic":
+        model = st.selectbox("Model", ANTHROPIC_MODELS, index=0)
+    elif provider == "openai":
+        model = st.selectbox("Model", OPENAI_MODELS, index=0)
+    else:
+        model = st.text_input("Model name", placeholder="e.g. meta-llama/Llama-3-70b-chat-hf")
+        base_url = st.text_input(
+            "API base URL",
+            placeholder="e.g. https://api.together.xyz/v1",
+            help="'Other LLM' talks to any OpenAI-compatible /v1/chat/completions endpoint "
+            "(Together, Groq, OpenRouter, a local vLLM/Ollama server, etc.) with function-calling "
+            "support. There's no universal LLM protocol, so this is the broadest concrete option.",
+        )
+
+    if st.button("🔑 Test API Key", width="stretch"):
+        if not api_key:
+            st.error("Enter an API key first.")
+        elif provider == "other" and not model:
+            st.error("Enter a model name for the 'Other LLM' provider first.")
+        else:
+            test_agent = TravelOptimizationAgent(provider=provider, api_key=api_key, model=model, base_url=base_url)
+            with st.spinner("Testing API key..."):
+                test_error = test_agent.validate_api_key()
+            if test_error:
+                st.error(f"API key test failed: {test_error}")
+            else:
+                st.success("✅ API key works.")
 
 
 # --- run the pipeline for whichever tab triggered it -------------------------
 
 if scenario_run_stops is not None:
-    _run_pipeline(scenario_run_stops, start_time, scenario_run_budget, trip_date, api_key, model, engine, ors_api_key)
+    _run_pipeline(
+        scenario_run_stops, start_time, scenario_run_budget, trip_date,
+        provider, api_key, model, base_url, engine, ors_api_key,
+    )
 elif custom_run_stops is not None:
     _run_pipeline(
-        custom_run_stops, start_time, custom_run_budget, trip_date, api_key, model, engine, ors_api_key,
+        custom_run_stops, start_time, custom_run_budget, trip_date,
+        provider, api_key, model, base_url, engine, ors_api_key,
         extra_errors=custom_run_errors,
     )
 
@@ -349,9 +409,9 @@ elif custom_run_stops is not None:
 
 st.title("🧭 Travel Optimization AI Agent")
 st.caption(
-    "Load a sample scenario or build your own stops with real addresses and time windows, then let a "
-    f"Claude agent geocode, fetch real travel times, and iteratively optimize the route (up to "
-    f"{MAX_ITERATIONS} refinement passes)."
+    "Load a sample scenario or build your own stops with real addresses and time windows, then let "
+    f"an LLM agent (Anthropic, OpenAI, or another provider you choose) geocode, fetch real travel "
+    f"times, and iteratively optimize the route (up to {MAX_ITERATIONS} refinement passes)."
 )
 
 result = st.session_state.result
