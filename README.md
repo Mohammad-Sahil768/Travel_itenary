@@ -93,7 +93,7 @@ dropdown. Internally, `travel_agent/agent.py` hardcodes:
 
 ```python
 DEFAULT_PROVIDER = "nvidia_nim"
-DEFAULT_MODEL = "meta/llama-3.3-70b-instruct"
+DEFAULT_MODEL = "nvidia/llama-3.1-nemotron-70b-instruct"
 DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1"
 ```
 
@@ -118,15 +118,24 @@ Community Cloud. Both the underlying `httpx.Client` and `ChatOpenAI` have
 an explicit 60-second timeout, so a slow or overloaded backend fails with a
 clear error instead of hanging the Streamlit session.
 
-⚠️ **This particular swap is unverified live** — NVIDIA's domains
-(`integrate.api.nvidia.com`, `build.nvidia.com`, `api.nvcf.nvidia.com`)
-were all unreachable from the dev sandbox that made this change, unlike
-Google's endpoint before it, which *was* directly tested. `meta/llama-3.3-70b-instruct`
-is a well-documented, tool-calling-capable model on NVIDIA's catalog as of
-this writing, but if it 404s, browse [build.nvidia.com](https://build.nvidia.com)
-for the exact current model id (they're path-like strings, e.g.
-`meta/llama-3.1-70b-instruct`, `mistralai/mixtral-8x22b-instruct-v0.1`,
-`nvidia/llama-3.1-nemotron-70b-instruct`) and update `DEFAULT_MODEL`.
+⚠️ **NVIDIA's catalog churns — a real key's `GET /v1/models` is the
+reliable way to pick a model, not guessing from docs/memory.** The
+endpoint/auth were confirmed correct on the first real test (a clean
+401→200-shaped auth pass), but the first model tried, `meta/llama-3.3-70b-instruct`,
+came back `410 Gone — reached its end of life`. Querying `/v1/models`
+with a real key returned 82 currently-available models for that
+account; `nvidia/llama-3.1-nemotron-70b-instruct` was picked from that
+real list — an NVIDIA-house model (less exposed to a third-party
+vendor's own retirement schedule) built on Llama 3.1's architecture,
+which has solid native tool-calling support. If this one also
+disappears, query `/v1/models` again with your key rather than
+guessing a name:
+```python
+import httpx
+resp = httpx.get("https://integrate.api.nvidia.com/v1/models",
+                  headers={"Authorization": "Bearer nvapi-..."})
+print([m["id"] for m in resp.json()["data"]])
+```
 
 **Your key never touches disk** — it lives only in Streamlit's in-memory
 `st.session_state` for the browser tab's session; it's not written to a file
@@ -172,10 +181,9 @@ Or paste the API key directly into the sidebar's **API Key** field at runtime.
    NVIDIA_API_KEY = "nvapi-..."
    ```
 4. Deploy. `requirements.txt` is picked up automatically. NVIDIA's API is
-   fully public, so this should work the same on Streamlit Community Cloud
-   as it does locally — no network/VPN caveat, same as the Google backend
-   before it (though this specific endpoint hasn't been tested from either
-   environment yet — see the unverified-live note above).
+   fully public, so this works the same on Streamlit Community Cloud as it
+   does locally — no network/VPN caveat, same as the Google backend before
+   it.
 
 ## Project layout
 

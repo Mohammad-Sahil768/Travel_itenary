@@ -26,15 +26,17 @@ from .tools import validate_constraints
 # endpoint -- a normal public API (properly-trusted TLS cert, no
 # verify=False hack needed), reached with a free-tier key from
 # https://build.nvidia.com (keys start with "nvapi-").
-# llama-3.3-70b-instruct chosen for solid, well-documented tool-calling
-# support on this catalog. UNVERIFIED LIVE as of this change -- NVIDIA's
-# domains (integrate.api.nvidia.com, build.nvidia.com, api.nvcf.nvidia.com)
-# were all unreachable from the dev sandbox that made this change, unlike
-# Google's endpoint earlier. Test immediately after deploying; if the
-# model 404s, browse https://build.nvidia.com for the exact current model
-# id string (they're path-like, e.g. "meta/llama-3.3-70b-instruct").
+#
+# meta/llama-3.3-70b-instruct (tried first) returned 410 Gone -- reached
+# end of life. Queried GET /v1/models with a real key to get this
+# account's actual current model list (82 models) rather than guess
+# again; picked nvidia/llama-3.1-nemotron-70b-instruct: an NVIDIA-house
+# model (less exposed to a third-party vendor's own EOL schedule) built
+# on Llama 3.1's architecture, which has solid native tool-calling
+# support. If this one also goes away, rerun that /v1/models query
+# rather than guessing a name -- NVIDIA's catalog churns.
 DEFAULT_PROVIDER = "nvidia_nim"
-DEFAULT_MODEL = "meta/llama-3.3-70b-instruct"
+DEFAULT_MODEL = "nvidia/llama-3.1-nemotron-70b-instruct"
 DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1"
 MAX_ITERATIONS = 3
 
