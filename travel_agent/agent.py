@@ -89,18 +89,28 @@ class OptimizationResult:
 
 
 def _build_user_prompt(
-    stops: List[Stop], start_time: str, total_budget_minutes: int, matrix: TravelMatrix
+    stops: List[Stop],
+    start_time: str,
+    total_budget_minutes: int,
+    matrix: TravelMatrix,
+    trip_date: Optional[str] = None,
 ) -> str:
-    lines = [
+    lines = []
+    if trip_date:
+        lines.append(f"Trip date: {trip_date}")
+    lines += [
         f"Trip start time: {start_time}",
         f"Total time budget: {total_budget_minutes} minutes",
         "",
-        "Stops (name | earliest | latest | required visit duration):",
+        "Stops (name | address | earliest | latest | required visit duration):",
     ]
     for s in stops:
         earliest = s.earliest or "none"
         latest = s.latest or "none"
-        lines.append(f"- {s.name} | earliest={earliest} | latest={latest} | duration={s.duration_minutes} min")
+        address = s.display_address or s.address or "n/a"
+        lines.append(
+            f"- {s.name} | {address} | earliest={earliest} | latest={latest} | duration={s.duration_minutes} min"
+        )
 
     lines.append("")
     lines.append("Precomputed travel times (minutes) between every pair of stops:")
@@ -149,10 +159,14 @@ class TravelOptimizationAgent:
         start_time: str,
         total_budget_minutes: int,
         matrix: TravelMatrix,
+        trip_date: Optional[str] = None,
     ) -> OptimizationResult:
         stops_by_name = {s.name: s for s in stops}
         messages: List[Dict] = [
-            {"role": "user", "content": _build_user_prompt(stops, start_time, total_budget_minutes, matrix)}
+            {
+                "role": "user",
+                "content": _build_user_prompt(stops, start_time, total_budget_minutes, matrix, trip_date),
+            }
         ]
 
         iterations: List[IterationRecord] = []

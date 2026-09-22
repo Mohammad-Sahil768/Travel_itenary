@@ -2,3 +2,4 @@ streamlit>=1.38
 anthropic>=1.0.0
 pandas>=2.0
 requests>=2.31
+geopy>=2.4

@@ -12,8 +12,10 @@ class Stop:
     """A single itinerary stop."""
 
     name: str
-    lat: Optional[float] = None
+    address: str = ""  # free-text address/place name, geocoded before routing
+    lat: Optional[float] = None  # filled in by geocoding.geocode_stops()
     lon: Optional[float] = None
+    display_address: Optional[str] = None  # the geocoder's resolved/normalized address
     earliest: Optional[str] = None  # "HH:MM", inclusive lower bound on arrival
     latest: Optional[str] = None  # "HH:MM", inclusive upper bound on departure
     duration_minutes: int = 30  # time to spend at the stop
@@ -47,3 +49,15 @@ def try_parse_hhmm(value: str) -> Optional[int]:
         return parse_hhmm(value)
     except ValueError:
         return None
+
+
+def to_12h(value: str) -> str:
+    """Format a "HH:MM" 24-hour string as "H:MM AM/PM" for display. Returns the
+    input unchanged if it doesn't parse."""
+    minutes = try_parse_hhmm(value)
+    if minutes is None:
+        return value
+    hour24, minute = divmod(minutes, 60)
+    period = "AM" if hour24 < 12 else "PM"
+    hour12 = hour24 % 12 or 12
+    return f"{hour12}:{minute:02d} {period}"
