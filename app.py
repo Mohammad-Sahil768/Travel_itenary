@@ -7,7 +7,7 @@ Two ways to build a trip:
 
 Both paths converge on the same pipeline: geocode addresses, fetch real
 travel times, run the tool-use agent, and render the same results. The LLM
-backend is fixed (NVIDIA's API Catalog, via LangChain) rather than
+backend is fixed (Google AI Studio's Gemini API, via LangChain) rather than
 user-selectable — the sidebar only asks for an API key.
 """
 
@@ -33,7 +33,7 @@ PROVIDER = DEFAULT_PROVIDER
 MODEL = DEFAULT_MODEL
 BASE_URL = DEFAULT_BASE_URL
 
-API_KEY_SECRET_NAME = "NVIDIA_API_KEY"
+API_KEY_SECRET_NAME = "GOOGLE_API_KEY"
 
 
 def _default_api_key() -> str:
@@ -391,7 +391,7 @@ with st.sidebar:
     )
 
     st.divider()
-    st.subheader("NVIDIA API")
+    st.subheader("Google AI Studio")
     api_key = st.text_input("API Key", value=_default_api_key(), type="password").strip()
 
     if st.button("🔑 Test API Key", width="stretch"):
