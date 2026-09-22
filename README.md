@@ -94,7 +94,7 @@ dropdown. Internally, `travel_agent/agent.py` hardcodes:
 
 ```python
 DEFAULT_PROVIDER = "tcs_genai_lab"
-DEFAULT_MODEL = "azure/genailab-maas-gpt-4o-mini"
+DEFAULT_MODEL = "azure_ai/genailab-maas-DeepSeek-V3-0324"
 DEFAULT_BASE_URL = "https://genailab.tcs.in"
 ```
 
@@ -108,15 +108,17 @@ exactly as it does for any other backend — `agent.py`'s outer refine loop,
 the JSON contract, and the independent constraint validation are completely
 unchanged by this swap.
 
-**Why `gpt-4o-mini` instead of the originally-requested DeepSeek-V3
-(`azure_ai/genailab-maas-DeepSeek-V3-0324`):** live testing against TCS
-GenAI Lab's endpoint returned `429 No deployments available for selected
-model` for DeepSeek-V3 — a capacity issue on TCS's side, not a bug here.
-`gpt-4o-mini` is a native Azure OpenAI model (mature, well-tested
-tool-calling support through LiteLLM) and a smaller deployment that tends
-to have more available capacity than a flagship model. Any model from
-TCS GenAI Lab's list works the same way — just change `DEFAULT_MODEL`
-(prefix `azure/` for classic Azure OpenAI deployments like the gpt-* family,
+**Model access on TCS GenAI Lab is per-account (RBAC), not universal** —
+not every key can use every model on the list. During setup, this account
+got `429 No deployments available` on DeepSeek-V3 (a transient capacity
+issue — auth and authorization both passed) but `RBAC: access denied` on
+`azure/genailab-maas-gpt-4o-mini` (this account genuinely isn't authorized
+for it). `DEFAULT_MODEL` is set to DeepSeek-V3 since that's the one
+confirmed-authorized model for this account; a 429 there is worth retrying,
+but an RBAC error on a different model means asking whoever administers
+your TCS GenAI Lab account for access, not changing code. If you *are*
+authorized for a different model, just change `DEFAULT_MODEL` (prefix
+`azure/` for classic Azure OpenAI deployments like the gpt-* family,
 `azure_ai/` for Azure AI Foundry "Models as a Service" like DeepSeek/Llama/Phi).
 
 ⚠️ **TLS verification is disabled for this endpoint**
