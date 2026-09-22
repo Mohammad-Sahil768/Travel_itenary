@@ -2,11 +2,10 @@
 
 A Streamlit app that sequences a list of stops (each with a time window and a
 required visit duration) into an optimized itinerary. An LLM tool-use agent —
-served through **Google AI Studio's free-tier Gemini API via LangChain** —
-fetches real travel times and validates its own plan, refining it over up to
-3 iterations until every constraint is satisfied. You only ever provide an
-API key — the provider, model, and endpoint are fixed in code, not a
-sidebar choice.
+served through **NVIDIA's API Catalog via LangChain** — fetches real travel
+times and validates its own plan, refining it over up to 3 iterations until
+every constraint is satisfied. You only ever provide an API key — the
+provider, model, and endpoint are fixed in code, not a sidebar choice.
 
 ## How it works
 
@@ -93,25 +92,24 @@ The sidebar only ever asks for an **API Key** — there's no provider or model
 dropdown. Internally, `travel_agent/agent.py` hardcodes:
 
 ```python
-DEFAULT_PROVIDER = "google_ai_studio"
-DEFAULT_MODEL = "gemini-3.6-flash"
-DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+DEFAULT_PROVIDER = "nvidia_nim"
+DEFAULT_MODEL = "meta/llama-3.3-70b-instruct"
+DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1"
 ```
 
 `app.py` imports these as `PROVIDER`/`MODEL`/`BASE_URL` and never lets the
 user override them. The actual call is made by
 `travel_agent/llm_providers.py`'s `LangChainBackend`, which wraps
 [`langchain_openai.ChatOpenAI`](https://python.langchain.com/docs/integrations/chat/openai/)
-pointed at Google's [OpenAI-compatibility endpoint](https://ai.google.dev/gemini-api/docs/openai)
-for the Gemini API, using LangChain's native `bind_tools()` so the agent's
-tool-calling loop (`get_travel_time` / `validate_constraints`) works exactly
-as it does for any other backend — `agent.py`'s outer refine loop, the JSON
-contract, and the independent constraint validation are completely
-unchanged by this swap.
+pointed at [NVIDIA's OpenAI-compatible API Catalog endpoint](https://build.nvidia.com/)
+("NIM"), using LangChain's native `bind_tools()` so the agent's tool-calling
+loop (`get_travel_time` / `validate_constraints`) works exactly as it does
+for any other backend — `agent.py`'s outer refine loop, the JSON contract,
+and the independent constraint validation are completely unchanged by
+this swap.
 
-**Get a free-tier key** at [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
-(a Google account is all that's needed — no billing setup required for the
-free tier). Paste it into the sidebar's **API Key** field.
+**Get a free-tier key** at [build.nvidia.com](https://build.nvidia.com)
+(keys start with `nvapi-`). Paste it into the sidebar's **API Key** field.
 
 This is a normal public API: a properly-trusted TLS certificate (no
 `verify=False` workaround needed, unlike an internal enterprise gateway)
@@ -120,17 +118,19 @@ Community Cloud. Both the underlying `httpx.Client` and `ChatOpenAI` have
 an explicit 60-second timeout, so a slow or overloaded backend fails with a
 clear error instead of hanging the Streamlit session.
 
-⚠️ Model naming here moved fast: `gemini-2.5-flash` (tried first) came
-back `404 ... no longer available to new users`, with Google's own error
-naming `gemini-3.6-flash` as the replacement — that's what `DEFAULT_MODEL`
-is set to now. Google's model names shift over time; if this 404s again,
-check [Google's model list](https://ai.google.dev/gemini-api/docs/models)
-for the current free-tier lineup (or just read the 404 message itself —
-Google's API tends to name the replacement directly, as it did here).
+⚠️ **This particular swap is unverified live** — NVIDIA's domains
+(`integrate.api.nvidia.com`, `build.nvidia.com`, `api.nvcf.nvidia.com`)
+were all unreachable from the dev sandbox that made this change, unlike
+Google's endpoint before it, which *was* directly tested. `meta/llama-3.3-70b-instruct`
+is a well-documented, tool-calling-capable model on NVIDIA's catalog as of
+this writing, but if it 404s, browse [build.nvidia.com](https://build.nvidia.com)
+for the exact current model id (they're path-like strings, e.g.
+`meta/llama-3.1-70b-instruct`, `mistralai/mixtral-8x22b-instruct-v0.1`,
+`nvidia/llama-3.1-nemotron-70b-instruct`) and update `DEFAULT_MODEL`.
 
 **Your key never touches disk** — it lives only in Streamlit's in-memory
 `st.session_state` for the browser tab's session; it's not written to a file
-or logged. It *is* sent to Google's API.
+or logged. It *is* sent to NVIDIA's API.
 
 **API key validation** — clicking **🔑 Test API Key**, or clicking **Load
 This Scenario** / **Optimize**, always makes one minimal test call first
@@ -138,25 +138,25 @@ This Scenario** / **Optimize**, always makes one minimal test call first
 optimization run. A bad key is reported immediately instead of failing deep
 into the pipeline.
 
-### Why this app went through Anthropic → TCS GenAI Lab → Google AI Studio
+### Why this app's LLM backend keeps changing
 
 Worth knowing if you're picking this project back up: this app's LLM
-backend was originally Anthropic Claude, then swapped to TCS GenAI Lab (an
-internal enterprise gateway) per a specific request, then to Google AI
-Studio after real, extended debugging of TCS's gateway (a `/v1` path
+backend went Anthropic Claude → TCS GenAI Lab (an internal enterprise
+gateway, per a specific request; extended debugging there hit a `/v1` path
 mismatch causing confusing RBAC-denied errors, then per-account model
-authorization limits) made it worth trying a simpler, fully public
-alternative. None of that architecture churn touched `agent.py`'s outer
-loop, `tools.py`, or the JSON contract — only `travel_agent/llm_providers.py`
-and a few constants in `travel_agent/agent.py` changed each time. If TCS
-GenAI Lab access issues get resolved on your account and you want to swap
-back, that's the same small, contained set of files to touch.
+authorization limits) → Google AI Studio (worked, but a model name went
+stale mid-use — Google's own 404 named the replacement) → NVIDIA's API
+Catalog (current). None of that churn touched `agent.py`'s outer loop,
+`tools.py`, or the JSON contract — only `travel_agent/llm_providers.py`
+and a few constants in `travel_agent/agent.py` changed each time. If you
+want to try yet another OpenAI-compatible provider, or revert to one of
+the earlier ones, that's the same small, contained set of files to touch.
 
 ## Running locally
 
 ```bash
 pip install -r requirements.txt
-export GOOGLE_API_KEY=...
+export NVIDIA_API_KEY=nvapi-...
 streamlit run app.py
 ```
 
@@ -169,11 +169,13 @@ Or paste the API key directly into the sidebar's **API Key** field at runtime.
    pointing at this repo and `app.py`.
 3. In the app's **Settings → Secrets**, add:
    ```toml
-   GOOGLE_API_KEY = "..."
+   NVIDIA_API_KEY = "nvapi-..."
    ```
-4. Deploy. `requirements.txt` is picked up automatically. Google's API is
-   fully public, so this works the same on Streamlit Community Cloud as
-   it does locally — no network/VPN caveat this time.
+4. Deploy. `requirements.txt` is picked up automatically. NVIDIA's API is
+   fully public, so this should work the same on Streamlit Community Cloud
+   as it does locally — no network/VPN caveat, same as the Google backend
+   before it (though this specific endpoint hasn't been tested from either
+   environment yet — see the unverified-live note above).
 
 ## Project layout
 
@@ -184,7 +186,7 @@ travel_agent/
   geocoding.py              Nominatim (OpenStreetMap) address -> coordinates, with caching
   routing.py                OSRM / OpenRouteService clients + haversine fallback
   tools.py                  Tool schemas + get_travel_time / validate_constraints
-  llm_providers.py          LangChainBackend: ChatOpenAI -> Google AI Studio, with tool-calling
+  llm_providers.py          LangChainBackend: ChatOpenAI -> NVIDIA API Catalog, with tool-calling
   agent.py                  The provider-agnostic tool-use optimization loop
   sample_data.py            3 preloaded scenarios (Urban, Regional, Same-day), given as real addresses
 ```

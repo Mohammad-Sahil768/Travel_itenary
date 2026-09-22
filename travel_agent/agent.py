@@ -22,18 +22,20 @@ from .models import Stop
 from .routing import TravelMatrix
 from .tools import validate_constraints
 
-# Google AI Studio's Gemini API, via its OpenAI-compatibility endpoint --
-# a normal public API (properly-trusted TLS cert, no verify=False hack
-# needed, reachable from anywhere including Streamlit Community Cloud),
-# reached with a free-tier key from https://aistudio.google.com/apikey.
-# gemini-2.5-flash was tried first but is no longer available to new
-# users as of live testing -- Google's own 404 response named
-# gemini-3.6-flash as its replacement, so that's what's used here.
-# Google's model names shift over time; if this 404s again, check
-# https://ai.google.dev/gemini-api/docs/models for the current lineup.
-DEFAULT_PROVIDER = "google_ai_studio"
-DEFAULT_MODEL = "gemini-3.6-flash"
-DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+# NVIDIA's API Catalog (build.nvidia.com / "NIM"), via its OpenAI-compatible
+# endpoint -- a normal public API (properly-trusted TLS cert, no
+# verify=False hack needed), reached with a free-tier key from
+# https://build.nvidia.com (keys start with "nvapi-").
+# llama-3.3-70b-instruct chosen for solid, well-documented tool-calling
+# support on this catalog. UNVERIFIED LIVE as of this change -- NVIDIA's
+# domains (integrate.api.nvidia.com, build.nvidia.com, api.nvcf.nvidia.com)
+# were all unreachable from the dev sandbox that made this change, unlike
+# Google's endpoint earlier. Test immediately after deploying; if the
+# model 404s, browse https://build.nvidia.com for the exact current model
+# id string (they're path-like, e.g. "meta/llama-3.3-70b-instruct").
+DEFAULT_PROVIDER = "nvidia_nim"
+DEFAULT_MODEL = "meta/llama-3.3-70b-instruct"
+DEFAULT_BASE_URL = "https://integrate.api.nvidia.com/v1"
 MAX_ITERATIONS = 3
 
 SYSTEM_PROMPT = """You are a Travel Optimization AI Agent. You sequence a fixed list of \
