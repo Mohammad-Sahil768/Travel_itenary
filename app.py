@@ -14,7 +14,7 @@ and render the same results.
 from __future__ import annotations
 
 import os
-from datetime import date, time as dtime
+from datetime import date, datetime, time as dtime, timedelta
 from typing import Dict, List, Optional
 
 import pandas as pd
@@ -72,14 +72,13 @@ def _time_to_hhmm(value) -> Optional[str]:
     return None
 
 
-def _parse_budget_hours(value: str) -> Optional[int]:
-    try:
-        hours = float(str(value).strip())
-    except (TypeError, ValueError):
-        return None
-    if hours <= 0:
-        return None
-    return int(round(hours * 60))
+def _format_date_time(d: date, hhmm: str) -> str:
+    return f"{d.strftime('%b %d')}, {to_12h(hhmm)}"
+
+
+def _format_available(minutes: int) -> str:
+    hours, mins = divmod(max(minutes, 0), 60)
+    return f"{hours}h" if mins == 0 else f"{hours}h {mins}m"
 
 
 def _custom_entries_to_stops(entries: List[Dict]) -> List[Stop]:
@@ -126,6 +125,8 @@ def _run_pipeline(
     start_time: str,
     total_budget_minutes: int,
     trip_date: date,
+    end_date: date,
+    end_time: str,
     provider: str,
     api_key: str,
     model: str,
@@ -182,7 +183,10 @@ def _run_pipeline(
             st.session_state.result = result
             st.session_state.matrix = matrix
             st.session_state.used_stops = stops
-            st.session_state.trip_date = trip_date
+            st.session_state.run_start_time = start_time
+            st.session_state.run_end_date = end_date
+            st.session_state.run_end_time = end_time
+            st.session_state.run_available_minutes = total_budget_minutes
         except Exception as exc:  # surfaced to the user, not swallowed
             st.session_state.result = None
             st.exception(exc)
@@ -193,7 +197,11 @@ def _run_pipeline(
 if "trip_date" not in st.session_state:
     st.session_state.trip_date = date.today()
 if "start_time" not in st.session_state:
-    st.session_state.start_time = "09:00"
+    st.session_state.start_time = dtime(9, 0)
+if "end_date" not in st.session_state:
+    st.session_state.end_date = date.today()
+if "end_time" not in st.session_state:
+    st.session_state.end_time = dtime(17, 0)
 if "result" not in st.session_state:
     st.session_state.result = None
 if "matrix" not in st.session_state:
@@ -209,8 +217,24 @@ if "custom_next_id" not in st.session_state:
     st.session_state.custom_next_id = 2
 if "custom_start_location" not in st.session_state:
     st.session_state.custom_start_location = ""
-if "custom_budget_hours" not in st.session_state:
-    st.session_state.custom_budget_hours = "8"
+
+
+def _apply_scenario_to_widgets() -> None:
+    """on_click callback for "Load This Scenario": pushes the scenario's own
+    start time / budget into the shared Start/End widgets *before* this rerun
+    renders them (an on_click callback runs ahead of the script body), so the
+    sidebar picture stays consistent with what's about to run. A plain
+    post-render assignment can't do this — Streamlit raises
+    StreamlitWidgetAlreadyInstantiatedError if a key='...'-bound widget's
+    session_state entry is written after that widget has already rendered
+    this pass."""
+    scenario = load_scenario(st.session_state["scenario_select"])
+    start_t = _hhmm_to_time(scenario["start_time"])
+    st.session_state.start_time = start_t
+    start_dt = datetime.combine(st.session_state.trip_date, start_t)
+    end_dt = start_dt + timedelta(minutes=scenario["total_budget_minutes"])
+    st.session_state.end_date = end_dt.date()
+    st.session_state.end_time = end_dt.time()
 
 
 # --- sidebar: trip setup -----------------------------------------------------
@@ -224,17 +248,36 @@ custom_run_errors: List[str] = []
 with st.sidebar:
     st.header("🧭 Trip Setup")
 
-    trip_date = st.date_input("Trip date", value=st.session_state.trip_date)
-    start_time_widget = st.time_input(
-        "Trip start time", value=_hhmm_to_time(st.session_state.start_time) or dtime(9, 0)
+    st.caption("Start")
+    sc1, sc2 = st.columns(2)
+    trip_date = sc1.date_input("Start date", key="trip_date", label_visibility="collapsed")
+    start_time_widget = sc2.time_input(
+        "Start time", key="start_time", format="12h", label_visibility="collapsed",
     )
     start_time = start_time_widget.strftime("%H:%M")
+
+    st.caption("End")
+    ec1, ec2 = st.columns(2)
+    end_date = ec1.date_input("End date", key="end_date", label_visibility="collapsed")
+    end_time_widget = ec2.time_input(
+        "End time", key="end_time", format="12h", label_visibility="collapsed",
+    )
+    end_time = end_time_widget.strftime("%H:%M")
+
+    available_minutes = int(
+        (datetime.combine(end_date, end_time_widget) - datetime.combine(trip_date, start_time_widget)).total_seconds()
+        // 60
+    )
+    if available_minutes <= 0:
+        st.error("⚠️ End date/time must be after start date/time.")
+    else:
+        st.caption(f"⏱️ Available time: **{_format_available(available_minutes)}**")
 
     st.divider()
     tab1, tab2 = st.tabs(["📂 Load Scenario", "✏️ Custom Stops"])
 
     with tab1:
-        scenario_name = st.selectbox("Select sample scenario", get_scenario_names())
+        scenario_name = st.selectbox("Select sample scenario", get_scenario_names(), key="scenario_select")
         preview = load_scenario(scenario_name)
         with st.expander("Scenario details", expanded=True):
             st.caption(
@@ -257,11 +300,15 @@ with st.sidebar:
                 width="stretch",
                 hide_index=True,
             )
-        if st.button("📂 Load This Scenario", type="primary", width="stretch"):
+        if st.button(
+            "📂 Load This Scenario", type="primary", width="stretch", on_click=_apply_scenario_to_widgets
+        ):
+            # The on_click callback already pushed this scenario's start time and
+            # derived end time/date into the Start/End widgets above *before* they
+            # rendered this run, so trip_date/start_time/end_date/end_time (read
+            # from those widgets earlier in this same pass) are already correct.
             scenario_run_stops = preview["stops"]
             scenario_run_budget = preview["total_budget_minutes"]
-            start_time = preview["start_time"]
-            st.session_state.start_time = preview["start_time"]
 
     with tab2:
         st.session_state.custom_start_location = st.text_input(
@@ -270,8 +317,9 @@ with st.sidebar:
             placeholder="e.g. Times Square, NYC",
             help="If set, the route must begin here — real travel time to your first stop is included.",
         )
-        st.session_state.custom_budget_hours = st.text_input(
-            "Total time budget (hours)", value=st.session_state.custom_budget_hours
+        st.caption(
+            f"Uses the trip Start/End set above for the total time budget — currently "
+            f"**{_format_available(available_minutes) if available_minutes > 0 else 'invalid — fix Start/End above'}**."
         )
 
         st.caption("Stops — address, arrival window, and how long you'll spend there:")
@@ -312,9 +360,10 @@ with st.sidebar:
 
         st.divider()
         if st.button("🚀 Optimize", type="primary", width="stretch"):
-            budget_minutes = _parse_budget_hours(st.session_state.custom_budget_hours)
-            if budget_minutes is None:
-                custom_run_errors.append("Total time budget must be a positive number of hours (e.g. 6 or 7.5).")
+            if available_minutes <= 0:
+                custom_run_errors.append(
+                    "End date/time must be after start date/time — fix the trip Start/End above."
+                )
             real_stops = _custom_entries_to_stops(st.session_state.custom_stops)
             start_addr = st.session_state.custom_start_location.strip()
             if start_addr:
@@ -329,7 +378,7 @@ with st.sidebar:
                     )
                 ] + real_stops
             custom_run_stops = real_stops
-            custom_run_budget = budget_minutes or 0
+            custom_run_budget = max(available_minutes, 0)
 
     st.divider()
     st.subheader("Routing API")
@@ -394,12 +443,12 @@ with st.sidebar:
 
 if scenario_run_stops is not None:
     _run_pipeline(
-        scenario_run_stops, start_time, scenario_run_budget, trip_date,
+        scenario_run_stops, start_time, scenario_run_budget, trip_date, end_date, end_time,
         provider, api_key, model, base_url, engine, ors_api_key,
     )
 elif custom_run_stops is not None:
     _run_pipeline(
-        custom_run_stops, start_time, custom_run_budget, trip_date,
+        custom_run_stops, start_time, custom_run_budget, trip_date, end_date, end_time,
         provider, api_key, model, base_url, engine, ors_api_key,
         extra_errors=custom_run_errors,
     )
@@ -420,8 +469,6 @@ if result is not None:
     stops = st.session_state.used_stops
     matrix = st.session_state.matrix
     stops_by_name = {s.name: s for s in stops}
-
-    st.caption(f"📅 Trip date: **{st.session_state.trip_date.strftime('%A, %B %d, %Y')}**")
 
     with st.expander("📍 Geocoded locations"):
         for s in stops:
@@ -494,13 +541,19 @@ if result is not None:
         last_departure = try_parse_hhmm(timing[-1].get("departure", "")) if timing else None
         grand_total_min = (last_departure - first_arrival) if (first_arrival is not None and last_departure is not None) else None
 
+        st.markdown("**Trip window**")
+        wcol1, wcol2, wcol3, wcol4 = st.columns(4)
+        wcol1.metric("Start", _format_date_time(st.session_state.trip_date, st.session_state.run_start_time))
+        wcol2.metric("End", _format_date_time(st.session_state.run_end_date, st.session_state.run_end_time))
+        wcol3.metric("Available time", _format_available(st.session_state.run_available_minutes))
+        wcol4.metric("Plan feasible", "✅ YES" if not final_violations else "❌ NO")
+
         st.markdown("**Trip summary (real data)**")
-        col1, col2, col3, col4, col5 = st.columns(5)
+        col1, col2, col3, col4 = st.columns(4)
         col1.metric("Total distance", f"{total_distance_km:.1f} km")
         col2.metric("Total travel time", f"{total_travel_min:.0f} min")
         col3.metric("Total service time", f"{total_service_min} min")
         col4.metric("Grand total", f"{grand_total_min} min" if grand_total_min is not None else "n/a")
-        col5.metric("Feasible?", "✅ YES" if not final_violations else "❌ NO")
 
         st.markdown("**Agent metrics**")
         mcol1, mcol2, mcol3 = st.columns(3)

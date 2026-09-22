@@ -8,19 +8,27 @@ it over up to 3 iterations until every constraint is satisfied.
 
 ## How it works
 
-1. **You provide stops**, one of two ways (sidebar tabs):
+1. **You set a trip window** — Start date + time and End date + time, shared
+   above both tabs. The agent computes **available time = End − Start**
+   itself; there's no separate "budget in hours" field to fill in or keep in
+   sync. This can span midnight (e.g. 9 PM → 5 AM next day computes correctly
+   as 8 hours) — see the caveat under "Trip window" below for what that does
+   and doesn't mean for stop time windows.
+2. **You provide stops**, one of two ways (sidebar tabs):
    - **📂 Load Scenario** — pick one of three sample scenarios, preview its
-     stops/times/budget, and click **Load This Scenario** to geocode, route,
-     and optimize it immediately.
+     stops/times/budget, and click **Load This Scenario**. This also pushes
+     the scenario's own start time and (start + its budget) into the shared
+     Start/End fields above, so the sidebar and the run always agree, then
+     geocodes, routes, and optimizes immediately.
    - **✏️ Custom Stops** — build your own trip: an optional fixed **start
      location** (a real depot/origin the route must begin from — if set, real
-     travel time from it to your first stop counts against the budget), a
-     total time budget in hours, and a list of stops (address, earliest/latest
-     time pickers, service duration in minutes) with **➕ Add Stop** /
-     🗑️ remove-per-row controls, then click **🚀 Optimize**.
+     travel time from it to your first stop counts against the available
+     time) and a list of stops (address, earliest/latest time pickers,
+     service duration in minutes) with **➕ Add Stop** / 🗑️ remove-per-row
+     controls, then click **🚀 Optimize**.
 
-   A shared trip date and trip start time sit above both tabs. Either path
-   converges on the exact same pipeline below, and the same results section.
+   Either path converges on the exact same pipeline below, and the same
+   results section.
 2. **Geocoding** — each address is resolved to (latitude, longitude) via
    [OpenStreetMap Nominatim](https://nominatim.org/) (free, no API key, using
    `geopy`). Unresolvable addresses are reported per-stop and block the run
@@ -48,11 +56,26 @@ it over up to 3 iterations until every constraint is satisfied.
 5. **Results** — an expandable "Agent Reasoning" panel shows each iteration's
    reasoning, tool calls, and violations. A "Geocoded locations" panel shows
    exactly what address each stop resolved to (so you can catch a wrong match,
-   e.g. the wrong city). The final itinerary is shown as a table with real
-   resolved addresses, 12-hour arrival/departure times, and per-leg travel
-   time/distance, plus trip-summary metrics (total distance, total travel
-   time, total service time, grand total, feasibility YES/NO) and a
-   date-stamped CSV export.
+   e.g. the wrong city). A **"Trip window"** row shows exactly what was
+   asked for: **Start** (e.g. "Dec 25, 9:00 AM"), **End** (e.g.
+   "Dec 25, 5:00 PM"), **Available time** (e.g. "8h"), and **Plan feasible**
+   (✅ YES / ❌ NO — based on the same independent constraint check as
+   everywhere else in this app, not the model's own self-report). The final
+   itinerary is shown as a table with real resolved addresses, 12-hour
+   arrival/departure times, and per-leg travel time/distance, plus a second
+   summary row (total distance, total travel time, total service time, grand
+   total) and a date-stamped CSV export.
+
+### Trip window: what "Start/End" does and doesn't cover
+
+Available time = End − Start is a real datetime subtraction (it handles an
+overnight window correctly, e.g. 9 PM → 5 AM next day = 8 hours). Individual
+**stop** time windows (each stop's own earliest/latest) are still plain
+HH:MM values on a single calendar day, unchanged — this app doesn't (yet)
+support a stop's own window spanning past midnight. For a same-day trip
+(by far the common case) this is a non-issue; for an overnight window, the
+*budget* is computed correctly across the day boundary, but per-stop
+earliest/latest still can't express "this stop's window is on day 2."
 
 ### What "real" does and doesn't mean here
 
@@ -172,5 +195,6 @@ stop Claude picks first, with no dedicated depot leg.
   doesn't re-geocode every stop again.
 - Earliest/latest are now required time pickers (not free text). If a stop
   truly has no time restriction, set its window wide (e.g. 12:00 AM–11:59 PM).
-- This app plans a **single calendar day** per run — all stops share one trip
-  date, and times don't roll over into a next day.
+- Per-stop earliest/latest windows are still same-day HH:MM values — see
+  "Trip window" above for what that means when the overall trip Start/End
+  spans midnight.
