@@ -94,7 +94,7 @@ dropdown. Internally, `travel_agent/agent.py` hardcodes:
 
 ```python
 DEFAULT_PROVIDER = "tcs_genai_lab"
-DEFAULT_MODEL = "azure_ai/genailab-maas-DeepSeek-V3-0324"
+DEFAULT_MODEL = "azure/genailab-maas-gpt-4o-mini"
 DEFAULT_BASE_URL = "https://genailab.tcs.in"
 ```
 
@@ -108,6 +108,17 @@ exactly as it does for any other backend — `agent.py`'s outer refine loop,
 the JSON contract, and the independent constraint validation are completely
 unchanged by this swap.
 
+**Why `gpt-4o-mini` instead of the originally-requested DeepSeek-V3
+(`azure_ai/genailab-maas-DeepSeek-V3-0324`):** live testing against TCS
+GenAI Lab's endpoint returned `429 No deployments available for selected
+model` for DeepSeek-V3 — a capacity issue on TCS's side, not a bug here.
+`gpt-4o-mini` is a native Azure OpenAI model (mature, well-tested
+tool-calling support through LiteLLM) and a smaller deployment that tends
+to have more available capacity than a flagship model. Any model from
+TCS GenAI Lab's list works the same way — just change `DEFAULT_MODEL`
+(prefix `azure/` for classic Azure OpenAI deployments like the gpt-* family,
+`azure_ai/` for Azure AI Foundry "Models as a Service" like DeepSeek/Llama/Phi).
+
 ⚠️ **TLS verification is disabled for this endpoint**
 (`httpx.Client(verify=False)`, per the spec this was built from). This is
 apparently required because TCS GenAI Lab's gateway presents a certificate
@@ -117,16 +128,21 @@ protected against a man-in-the-middle on that network path. This is a
 deliberate trade-off for this one specific internal endpoint, not a general
 security posture; don't copy this pattern for a public-internet API.
 
-⚠️ **This is very likely an internal-network-only endpoint.** `genailab.tcs.in`
-reads as a TCS intranet/VPN hostname, not a publicly routable one. If you
-deploy this app somewhere outside TCS's network (e.g. Streamlit Community
-Cloud, a home machine), API calls to it will probably time out or fail DNS
-resolution — this backend is intended to run from within that network.
+Both calls (the underlying `httpx.Client` and `ChatOpenAI` itself) also have
+an explicit 60-second timeout, so a slow or overloaded model backend fails
+with a clear error instead of hanging the Streamlit session indefinitely —
+this was found and fixed after exactly that happened during setup.
+
+Live testing confirmed `genailab.tcs.in` is actually reachable and resolves
+to a real public IP (backed by a LiteLLM Proxy server) — the earlier caveat
+here about it being VPN/intranet-only wasn't borne out, at least from a
+TCS-managed machine. Whether it's reachable from fully outside any TCS
+network (e.g. Streamlit Community Cloud) is still untested.
 
 ⚠️ Note on the spec this was built from: it named `claude-3-5-sonnet-20241022`
 as an earlier "keep Anthropic" hardcode in a prior iteration of this app —
-now fully replaced by the TCS GenAI Lab/DeepSeek-V3 setup above, per this
-change's own explicit request to remove the Anthropic SDK entirely.
+now fully replaced by the TCS GenAI Lab setup above, per this change's own
+explicit request to remove the Anthropic SDK entirely.
 
 **Your key never touches disk** — it lives only in Streamlit's in-memory
 `st.session_state` for the browser tab's session; it's not written to a file
