@@ -1,12 +1,12 @@
-"""The Travel Optimization AI Agent: a Claude tool-use loop that iteratively
+"""The Travel Optimization AI Agent: an LLM tool-use loop that iteratively
 proposes, validates and refines a route.
 
 Outer loop (max 3 iterations):
-    1. Ask Claude to optimize the route (it may call get_travel_time /
+    1. Ask the LLM to optimize the route (it may call get_travel_time /
        validate_constraints any number of times along the way).
-    2. Parse Claude's final JSON itinerary.
+    2. Parse the LLM's final JSON itinerary.
     3. Independently re-validate it in Python (never just trust the model).
-    4. If violations remain and iterations are left, tell Claude exactly what
+    4. If violations remain and iterations are left, tell it exactly what
        failed and ask it to try again; otherwise stop.
 """
 
@@ -22,8 +22,10 @@ from .models import Stop
 from .routing import TravelMatrix
 from .tools import validate_constraints
 
-DEFAULT_PROVIDER = "anthropic"
-DEFAULT_MODEL = "claude-opus-5"
+# TCS GenAI Lab: an internal OpenAI-compatible gateway serving DeepSeek-V3.
+DEFAULT_PROVIDER = "tcs_genai_lab"
+DEFAULT_MODEL = "azure_ai/genailab-maas-DeepSeek-V3-0324"
+DEFAULT_BASE_URL = "https://genailab.tcs.in"
 MAX_ITERATIONS = 3
 
 SYSTEM_PROMPT = """You are a Travel Optimization AI Agent. You sequence a fixed list of \
@@ -158,7 +160,7 @@ class TravelOptimizationAgent:
         provider: str = DEFAULT_PROVIDER,
         api_key: str = "",
         model: str = DEFAULT_MODEL,
-        base_url: Optional[str] = None,
+        base_url: Optional[str] = DEFAULT_BASE_URL,
         max_iterations: int = MAX_ITERATIONS,
     ):
         self.provider = provider

@@ -7,7 +7,7 @@ Two ways to build a trip:
 
 Both paths converge on the same pipeline: geocode addresses, fetch real
 travel times, run the tool-use agent, and render the same results. The LLM
-provider/model are fixed (Anthropic Claude) rather than user-selectable —
+backend is fixed (TCS GenAI Lab, via LangChain) rather than user-selectable —
 the sidebar only asks for an API key.
 """
 
@@ -20,7 +20,7 @@ from typing import Dict, List, Optional
 import pandas as pd
 import streamlit as st
 
-from travel_agent.agent import DEFAULT_MODEL, MAX_ITERATIONS, TravelOptimizationAgent
+from travel_agent.agent import DEFAULT_BASE_URL, DEFAULT_MODEL, DEFAULT_PROVIDER, MAX_ITERATIONS, TravelOptimizationAgent
 from travel_agent.geocoding import geocode_stops
 from travel_agent.models import Stop, to_12h, try_parse_hhmm
 from travel_agent.routing import get_travel_matrix
@@ -28,21 +28,21 @@ from travel_agent.sample_data import get_scenario_names, load_scenario
 
 st.set_page_config(page_title="Travel Optimization AI Agent", page_icon="🧭", layout="wide")
 
-# LLM provider/model are fixed, not user-selectable (see sidebar). Kept as
-# constants rather than the older claude-3-5-sonnet-20241022 the change
-# request named, since that dated snapshot is a generation behind the
-# current model this app already uses elsewhere — see README.
-PROVIDER = "anthropic"
+# LLM provider/model/endpoint are fixed, not user-selectable (see sidebar).
+PROVIDER = DEFAULT_PROVIDER
 MODEL = DEFAULT_MODEL
+BASE_URL = DEFAULT_BASE_URL
+
+API_KEY_SECRET_NAME = "TCS_GENAI_API_KEY"
 
 
 def _default_api_key() -> str:
     try:
-        if "ANTHROPIC_API_KEY" in st.secrets:
-            return st.secrets["ANTHROPIC_API_KEY"]
+        if API_KEY_SECRET_NAME in st.secrets:
+            return st.secrets[API_KEY_SECRET_NAME]
     except Exception:
         pass
-    return os.environ.get("ANTHROPIC_API_KEY", "")
+    return os.environ.get(API_KEY_SECRET_NAME, "")
 
 
 def _hhmm_to_time(value: Optional[str]) -> Optional[dtime]:
@@ -131,14 +131,14 @@ def _run_pipeline(
     errors = list(extra_errors or [])
     errors += _validate_stop_inputs(stops, total_budget_minutes)
     if not api_key:
-        errors.append("An Anthropic API key is required.")
+        errors.append("An API key is required.")
     if errors:
         st.session_state.result = None
         for e in errors:
             st.error(e)
         return
 
-    agent = TravelOptimizationAgent(provider=PROVIDER, api_key=api_key, model=MODEL)
+    agent = TravelOptimizationAgent(provider=PROVIDER, api_key=api_key, model=MODEL, base_url=BASE_URL)
     with st.spinner("Validating API key..."):
         key_error = agent.validate_api_key()
     if key_error:
@@ -391,14 +391,14 @@ with st.sidebar:
     )
 
     st.divider()
-    st.subheader("Claude Agent")
-    api_key = st.text_input("Anthropic API key", value=_default_api_key(), type="password")
+    st.subheader("GenAI Lab")
+    api_key = st.text_input("API Key", value=_default_api_key(), type="password")
 
     if st.button("🔑 Test API Key", width="stretch"):
         if not api_key:
             st.error("Enter an API key first.")
         else:
-            test_agent = TravelOptimizationAgent(provider=PROVIDER, api_key=api_key, model=MODEL)
+            test_agent = TravelOptimizationAgent(provider=PROVIDER, api_key=api_key, model=MODEL, base_url=BASE_URL)
             with st.spinner("Testing API key..."):
                 test_error = test_agent.validate_api_key()
             if test_error:
@@ -427,7 +427,7 @@ elif custom_run_stops is not None:
 st.title("🧭 Travel Optimization AI Agent")
 st.caption(
     "Load a sample scenario or build your own stops with real addresses and time windows, then let "
-    f"a Claude agent geocode, fetch real travel times, and iteratively optimize the route (up to "
+    f"an LLM agent geocode, fetch real travel times, and iteratively optimize the route (up to "
     f"{MAX_ITERATIONS} refinement passes)."
 )
 
@@ -455,13 +455,13 @@ if result is not None:
                 for tc in record.tool_calls:
                     st.markdown(f"- `{tc.name}({tc.input})` → `{tc.result}`")
             if record.violations:
-                st.markdown("**Violations reported back to Claude:**")
+                st.markdown("**Violations reported back to the model:**")
                 for v in record.violations:
                     st.markdown(f"- {v}")
             if record.parse_error:
                 st.error(f"Parse error: {record.parse_error}")
             if record.raw_text:
-                st.markdown("**Claude's response:**")
+                st.markdown("**Model's response:**")
                 st.code(record.raw_text, language="json")
 
     st.subheader("📋 Optimized Itinerary")
