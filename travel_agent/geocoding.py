@@ -49,8 +49,10 @@ def geocode_address(address: str, timeout: float = 10.0) -> Tuple[float, float, 
 
     if location is None:
         raise GeocodingError(
-            f"Could not find a location for '{address}'. Try a more specific address "
-            "(e.g. add a city and state/country)."
+            f"Could not find a location for '{address}'. This free geocoder matches street "
+            "addresses much more reliably than informal landmark names — try the actual "
+            "street address (e.g. '30 Rockefeller Plaza, New York, NY' instead of "
+            "'Top of the Rock Observation Deck') or add a city/state."
         )
 
     result = (location.latitude, location.longitude, location.address)

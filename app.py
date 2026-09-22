@@ -149,7 +149,9 @@ with st.sidebar:
     st.subheader("Stops")
     st.caption(
         "Enter a real address or place name per stop (e.g. \"Times Square, New York, NY\"). "
-        "It's geocoded to coordinates automatically when you click Optimize."
+        "It's geocoded to coordinates automatically when you click Optimize. Well-known "
+        "landmarks usually work, but if one fails to geocode, use its street address instead "
+        "(e.g. \"30 Rockefeller Plaza, New York, NY\" rather than \"Top of the Rock\")."
     )
     edited_df = st.data_editor(
         st.session_state.stops_df,

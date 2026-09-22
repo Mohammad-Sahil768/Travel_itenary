@@ -17,17 +17,17 @@ SCENARIOS: Dict[str, Dict] = {
         "total_budget_minutes": 540,  # 9 hours
         "stops": [
             Stop("Statue of Liberty", "Statue of Liberty, New York, NY", earliest="08:00", latest="10:30", duration_minutes=90),
-            Stop("9/11 Memorial", "National September 11 Memorial, New York, NY", earliest="09:30", latest="12:00", duration_minutes=60),
+            Stop("9/11 Memorial", "180 Greenwich St, New York, NY", earliest="09:30", latest="12:00", duration_minutes=60),
             Stop("Times Square", "Times Square, New York, NY", earliest="11:00", latest="14:00", duration_minutes=45),
             Stop("Central Park", "Central Park, New York, NY", earliest="13:00", latest="16:00", duration_minutes=75),
-            Stop("Top of the Rock", "Top of the Rock Observation Deck, New York, NY", earliest="15:00", latest="17:00", duration_minutes=60),
+            Stop("Top of the Rock", "30 Rockefeller Plaza, New York, NY", earliest="15:00", latest="17:00", duration_minutes=60),
         ],
     },
     "Regional - 3 Cities (8 stops, 10am-6pm)": {
         "start_time": "10:00",
         "total_budget_minutes": 480,  # 8 hours
         "stops": [
-            Stop("Newark Museum", "Newark Museum of Art, Newark, NJ", earliest="10:00", latest="12:00", duration_minutes=45),
+            Stop("Newark Museum", "49 Washington St, Newark, NJ", earliest="10:00", latest="12:00", duration_minutes=45),
             Stop("Branch Brook Park", "Branch Brook Park, Newark, NJ", earliest="10:30", latest="13:00", duration_minutes=40),
             Stop("Liberty State Park", "Liberty State Park, Jersey City, NJ", earliest="11:00", latest="14:00", duration_minutes=50),
             Stop("Journal Square", "Journal Square, Jersey City, NJ", earliest="12:00", latest="15:00", duration_minutes=30),
@@ -42,7 +42,7 @@ SCENARIOS: Dict[str, Dict] = {
         "total_budget_minutes": 300,  # 5 hours
         "stops": [
             Stop("Downtown Bank Branch", "Wall Street, New York, NY", earliest="09:00", latest="11:00", duration_minutes=20),
-            Stop("City Passport Office", "James A. Farley Post Office, New York, NY", earliest="09:30", latest="13:00", duration_minutes=45),
+            Stop("City Passport Office", "421 8th Ave, New York, NY", earliest="09:30", latest="13:00", duration_minutes=45),
             Stop("Courier Pickup Depot", "Grand Central Terminal, New York, NY", earliest="10:00", latest="14:00", duration_minutes=15),
         ],
     },
