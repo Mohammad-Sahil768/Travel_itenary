@@ -94,7 +94,7 @@ dropdown. Internally, `travel_agent/agent.py` hardcodes:
 
 ```python
 DEFAULT_PROVIDER = "google_ai_studio"
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-3.6-flash"
 DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 ```
 
@@ -120,12 +120,13 @@ Community Cloud. Both the underlying `httpx.Client` and `ChatOpenAI` have
 an explicit 60-second timeout, so a slow or overloaded backend fails with a
 clear error instead of hanging the Streamlit session.
 
-⚠️ `gemini-2.5-flash` is Google's current default free-tier flash model as
-of when this was written; Google's model names shift over time. If
-`DEFAULT_MODEL` ever comes back "model not found," the well-established
-`gemini-2.0-flash` is a safe fallback — check
-[Google's model list](https://ai.google.dev/gemini-api/docs/models) for
-the current free-tier lineup.
+⚠️ Model naming here moved fast: `gemini-2.5-flash` (tried first) came
+back `404 ... no longer available to new users`, with Google's own error
+naming `gemini-3.6-flash` as the replacement — that's what `DEFAULT_MODEL`
+is set to now. Google's model names shift over time; if this 404s again,
+check [Google's model list](https://ai.google.dev/gemini-api/docs/models)
+for the current free-tier lineup (or just read the 404 message itself —
+Google's API tends to name the replacement directly, as it did here).
 
 **Your key never touches disk** — it lives only in Streamlit's in-memory
 `st.session_state` for the browser tab's session; it's not written to a file

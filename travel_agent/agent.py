@@ -26,11 +26,13 @@ from .tools import validate_constraints
 # a normal public API (properly-trusted TLS cert, no verify=False hack
 # needed, reachable from anywhere including Streamlit Community Cloud),
 # reached with a free-tier key from https://aistudio.google.com/apikey.
-# gemini-2.5-flash is Google's current default free-tier flash model; if
-# it 404s as an unknown model (Google's naming shifts over time), the
-# well-established "gemini-2.0-flash" is the fallback to try.
+# gemini-2.5-flash was tried first but is no longer available to new
+# users as of live testing -- Google's own 404 response named
+# gemini-3.6-flash as its replacement, so that's what's used here.
+# Google's model names shift over time; if this 404s again, check
+# https://ai.google.dev/gemini-api/docs/models for the current lineup.
 DEFAULT_PROVIDER = "google_ai_studio"
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-3.6-flash"
 DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 MAX_ITERATIONS = 3
 
