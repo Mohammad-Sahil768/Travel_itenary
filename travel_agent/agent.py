@@ -22,16 +22,14 @@ from .models import Stop
 from .routing import TravelMatrix
 from .tools import validate_constraints
 
-# TCS GenAI Lab: an internal OpenAI-compatible gateway. gpt-4o-mini was
-# tried as an alternative to DeepSeek-V3 (the original spec), but this
-# account got "RBAC: access denied" on it -- not authorized for that model.
-# DeepSeek-V3 IS confirmed authorized for this account (a live curl test
-# got HTTP 429 "No deployments available", which only happens *after*
-# auth/authorization checks pass -- a capacity issue, not a permissions
-# one). Reverted to DeepSeek-V3 as the one model actually confirmed to
-# work for this account; retry if it 429s again, that's transient.
+# TCS GenAI Lab: an internal OpenAI-compatible gateway. A full sweep of every
+# model on this account's list found only the native Azure OpenAI models
+# (gpt-35-turbo, gpt-4o, gpt-4o-mini) actually working -- every azure_ai/
+# (DeepSeek/Llama/Phi) model returned 404/bad request/RBAC-denied for this
+# account. gpt-4o chosen among the three working models for its stronger
+# tool-calling reliability on this app's structured JSON + multi-tool loop.
 DEFAULT_PROVIDER = "tcs_genai_lab"
-DEFAULT_MODEL = "azure_ai/genailab-maas-DeepSeek-V3-0324"
+DEFAULT_MODEL = "azure/genailab-maas-gpt-4o"
 DEFAULT_BASE_URL = "https://genailab.tcs.in"
 MAX_ITERATIONS = 3
 

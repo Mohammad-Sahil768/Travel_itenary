@@ -94,7 +94,7 @@ dropdown. Internally, `travel_agent/agent.py` hardcodes:
 
 ```python
 DEFAULT_PROVIDER = "tcs_genai_lab"
-DEFAULT_MODEL = "azure_ai/genailab-maas-DeepSeek-V3-0324"
+DEFAULT_MODEL = "azure/genailab-maas-gpt-4o"
 DEFAULT_BASE_URL = "https://genailab.tcs.in"
 ```
 
@@ -108,18 +108,23 @@ exactly as it does for any other backend — `agent.py`'s outer refine loop,
 the JSON contract, and the independent constraint validation are completely
 unchanged by this swap.
 
-**Model access on TCS GenAI Lab is per-account (RBAC), not universal** —
-not every key can use every model on the list. During setup, this account
-got `429 No deployments available` on DeepSeek-V3 (a transient capacity
-issue — auth and authorization both passed) but `RBAC: access denied` on
-`azure/genailab-maas-gpt-4o-mini` (this account genuinely isn't authorized
-for it). `DEFAULT_MODEL` is set to DeepSeek-V3 since that's the one
-confirmed-authorized model for this account; a 429 there is worth retrying,
-but an RBAC error on a different model means asking whoever administers
-your TCS GenAI Lab account for access, not changing code. If you *are*
-authorized for a different model, just change `DEFAULT_MODEL` (prefix
-`azure/` for classic Azure OpenAI deployments like the gpt-* family,
-`azure_ai/` for Azure AI Foundry "Models as a Service" like DeepSeek/Llama/Phi).
+**Model access on TCS GenAI Lab is per-account (RBAC), not universal** — not
+every key can use every model on the list. A full sweep of this account's
+model list during setup found: the three native Azure OpenAI models
+(`gpt-35-turbo`, `gpt-4o`, `gpt-4o-mini`) all work; every `azure_ai/`
+model (DeepSeek-R1, DeepSeek-V3, the Llama variants, the Phi variants)
+came back 404, bad request, or RBAC-denied for this account — and
+DeepSeek-V3 specifically also hit a transient `429 No deployments
+available` at one point along the way, before that RBAC picture became
+clear. `DEFAULT_MODEL` is `gpt-4o`, picked among the three working models
+for the most reliable tool-calling on this app's structured JSON +
+multi-tool loop; `gpt-4o-mini` is a valid cheaper/faster alternative if
+you want to trade some reliability for cost. If your account is
+authorized for different models, change `DEFAULT_MODEL` (prefix `azure/`
+for classic Azure OpenAI deployments like the gpt-* family, `azure_ai/`
+for Azure AI Foundry "Models as a Service" like DeepSeek/Llama/Phi) — an
+RBAC-denied result means asking whoever administers your TCS GenAI Lab
+account for access, not a code change.
 
 ⚠️ **TLS verification is disabled for this endpoint**
 (`httpx.Client(verify=False)`, per the spec this was built from). This is
