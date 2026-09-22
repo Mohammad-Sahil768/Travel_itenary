@@ -392,7 +392,7 @@ with st.sidebar:
 
     st.divider()
     st.subheader("GenAI Lab")
-    api_key = st.text_input("API Key", value=_default_api_key(), type="password")
+    api_key = st.text_input("API Key", value=_default_api_key(), type="password").strip()
 
     if st.button("🔑 Test API Key", width="stretch"):
         if not api_key:
